@@ -1,8 +1,8 @@
 /*
 * FileName        :    main.c
 * Description     :    This file contains concurrent SW implementation of a Beaglebone Linux
-*	               system handling multiple sensor interfacing and data logging in a multi-threaded
-*	               synchronized way.
+*					   system handling multiple sensor interfacing and data logging in a multi-threaded
+*					   synchronized way.
 *                        
 * File Author Name:    Bhallaji Venkatesan, Divya Sampath Kumar
 * Tools used      :    gcc, gedit, Sublime Text
@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "message.h"
+
 
 #define MSG_QUEUE "/msg_queue"
 
@@ -60,7 +61,7 @@ int main(int argc, char **argv)
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     //To modify attributes to improve scheduling efficiency and task synchronization
-    
+
     /* Creating Temp Sensor Thread */
     if(pthread_create(&tempsensor_thread, &attr, (void*)&app_tempsensor_task, NULL))
     {
