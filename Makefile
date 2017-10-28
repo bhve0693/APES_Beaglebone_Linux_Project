@@ -20,8 +20,6 @@ HFILES= message.h
 CFILES= src/main.c
 
 
-#SRCS= ${HFILES} ${CFILES}
-#OBJS= $(CFILES:.c=.o) 
 SRCS = $(wildcard src/*.c)
 OBJECTS = $(patsubst %.c,%.o,$(SRCS))
 
@@ -35,7 +33,5 @@ clean:
 	-rm -f *.o *.NEW *~ *.d
 	-rm -f ${OUTPUT} ${GARBAGE}
 
-#.c#.o:
-#	$(CC) $(CFLAGS) -c $<
 $(OBJECTS):src/%.o : src/%.c
 	$(CC) $(CFLAGS) -c $< 
