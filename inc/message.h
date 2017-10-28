@@ -17,21 +17,21 @@
 
 //Level of logs for criticality demarcation in the logfile
 typedef enum loglevel_t{
-LOG_DATA_VALID;     
-LOG_DATA_REQ;
-LOG_DATA_CONV;
-LOG_CRITICAL;
-LOG_INIT;
-LOG_ERR;
+LOG_DATA_VALID,     
+LOG_DATA_REQ,
+LOG_DATA_CONV,
+LOG_CRITICAL,
+LOG_INIT,
+LOG_ERR
 }loglevel;
 
 //Source Task 
 typedef enum srcid_t{
-SRC_MAIN;
-SRC_TEMPERATURE;
-SRC_LIGHT;
-SRC_LOG;
-SRC_DEFAULT;
+SRC_MAIN,
+SRC_TEMPERATURE,
+SRC_LIGHT,
+SRC_LOG,
+SRC_DEFAULT
 }srcid;
 
 //Log Packet
@@ -45,20 +45,20 @@ int32_t crc;           //CRC check for error checking mechanism
 
 
 /* Link Layer Functions */
-int8_t link_req_hb_notif(mq_t msgdt); // Requests Notifications from all the tasks in order of 
+int8_t link_req_hb_notif(mqd_t msgdt); // Requests Notifications from all the tasks in order of 
 									  // 1.app_tempsensor_task
 					                  // 2.app_lightsensor_task
 					                  // 3.app_sync_logger
 					 
-int8_t link_send_hb_notif(mq_t msgdt); 
+int8_t link_send_hb_notif(mqd_t msgdt); 
 
-int8_t link_send_log_init_status(mq_t msgdt,struct logpacket);
+int8_t link_send_log_init_status(mqd_t msgdt,struct logpacket);
 
-int8_t link_send_log_data_request(mq_t msgdt, struct logpacket);
+int8_t link_send_log_data_request(mqd_t msgdt, struct logpacket);
 
-int8_t link_send_log_err(mq_t msgdt, struct logpacket);
+int8_t link_send_log_err(mqd_t msgdt, struct logpacket);
 
-int8_t link_read_data(mq_t msgdt,void* data, srcid source, srcid dest); // Will be called by query functions. Will share the message queues with the sensor task.
+int8_t link_read_data(mqd_t msgdt,void* data, srcid source, srcid dest); // Will be called by query functions. Will share the message queues with the sensor task.
 
 int8_t link_send_logs(struct logpacket);
 

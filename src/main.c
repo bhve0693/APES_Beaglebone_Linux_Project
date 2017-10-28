@@ -28,7 +28,7 @@ static mqd_t mqd;
 
 logpacket msg_tempsensor,msg_lightsensor, msg_synclogger;
 
-void *app_tempsensor_task(void *args); // Temperature Sensor Thread/Task
+void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
 {
 	//Do Sensor data acquisition
 	//Send heartbeat notif when requested
@@ -37,7 +37,7 @@ void *app_tempsensor_task(void *args); // Temperature Sensor Thread/Task
 
 }
 
-void *app_lightsensor_task(void *args); //Light Sensor Thread/Task
+void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
 {
 	//Do Sensor data acquisition
 	//Send heartbeat notif when requested
@@ -46,7 +46,7 @@ void *app_lightsensor_task(void *args); //Light Sensor Thread/Task
 
 }
 
-void *app_sync_logger(void *args); // Synchronization Logger Thread/Task
+void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 {
 	//Handle Log Requests
 	//Send heartbeat notif when requested
