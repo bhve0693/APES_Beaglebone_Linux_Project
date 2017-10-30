@@ -1,5 +1,3 @@
-
-
 # FileName        : Makefile
 # Description     :	Generates executables in ~/APESDF17. Takes .h files from ~/APES_Beaglebone_linux_project/inc
 #					path
@@ -12,7 +10,7 @@ INCLUDE_DIRS = -Iinc
 CC=gcc
 
 CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread
-
+LIBS= -lrt
 OUTPUT=main_exec
 
 #Will be added as we add on header and C files
