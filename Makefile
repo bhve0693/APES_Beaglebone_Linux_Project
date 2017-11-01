@@ -13,11 +13,13 @@ CC=gcc
 
 CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread -lrt
 LIBS =  -lrt
-OUTPUT=main_exec i2c_drive
+OUTPUT=main_exec
+#OUTPUT=main_exec i2c_drive
 
 #Will be added as we add on header and C files
 HFILES= message.h fw_i2c.h
-CFILES= src/main.c src/i2c-drive.c
+CFILES= src/main.c 
+#CFILES= src/main.c src/i2c-drive.c
 
 
 SRCS = $(wildcard src/*.c)
@@ -29,8 +31,8 @@ all:	${OUTPUT}
 main_exec:$(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ main.o $(LIBS)
 
-i2c_drive:$(OBJECTS)
-	$(CC) $(CFLAGS) -o $@ i2c-drive.o $(LIBS)
+#i2c_drive:$(OBJECTS)
+#	$(CC) $(CFLAGS) -o $@ i2c-drive.o $(LIBS)
 
 clean:
 	-rm -f *.o *.NEW *~ *.d
