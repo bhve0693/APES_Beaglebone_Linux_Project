@@ -11,7 +11,7 @@
 INCLUDE_DIRS = -Iinc
 CC=gcc
 
-CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread -lrt
+CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread
 LIBS =  -lrt
 OUTPUT=main_exec
 #OUTPUT=main_exec i2c_drive

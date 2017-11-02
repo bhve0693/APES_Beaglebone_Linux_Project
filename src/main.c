@@ -1,8 +1,8 @@
 /*
 * FileName        :    main.c
 * Description     :    This file contains concurrent SW implementation of a Beaglebone Linux
-*					   system handling multiple sensor interfacing and data logging in a multi-threaded
-*					   synchronized way.
+*                      system handling multiple sensor interfacing and data logging in a multi-threaded
+*                      synchronized way.
 *                        
 * File Author Name:    Bhallaji Venkatesan, Divya Sampath Kumar
 * Tools used      :    gcc, gedit, Sublime Text
@@ -31,17 +31,23 @@
 #define TEMP_HB_CHECK_CNT  2
 #define LOG_HB_CHECK_CNT   3
 
-//#define HB_LOG_QUEUE "/hb_log_queue"
+#define HB_LOG_QUEUE "/hb_log_queue"
 
 pthread_t tempsensor_thread;
 pthread_t lightsensor_thread;
 pthread_t synclogger_thread;
 struct mq_attr mq_attr_queue;
 struct mq_attr mq_attr_hb_queue;
+struct mq_attr mq_attr_log_queue;
+
 static volatile sig_atomic_t light_flag = 0;
 static volatile sig_atomic_t temp_flag = 0;
 static volatile sig_atomic_t req_cnt = 0;
 
+pthread_cond_t sig_logger;
+pthread_mutex_t logger_mutex;
+pthread_mutex_t msg_temp_mutex;
+pthread_mutex_t msg_light_mutex;
 
 uint8_t hb_temp_cnt;
 uint8_t hb_light_cnt;
@@ -50,7 +56,7 @@ static uint8_t temp_hb_light;
 static mqd_t msg_queue;
 static mqd_t hb_temp_queue;
 static mqd_t hb_light_queue;
-//static mqd_t hb_log_queue;
+static mqd_t hb_log_queue;
 
 //static unsigned int counter;
 static volatile sig_atomic_t counter =0;
@@ -85,6 +91,16 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     uint8_t temp_count;
     usecs = 1000000;
     printf("\nIn Temperature Sensor Thread execution\n");
+    
+    //Creating Log message in logpacket
+    msg_tempsensor.logmsg = (char*)" Message from Temp Sensor";
+    status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+    if(status == -1)
+    {
+        printf("\ntemp was unable to send log message\n");
+    }
+    pthread_cond_signal(&sig_logger);
+
     while(1)
     {
         status=mq_send(msg_queue, (const char*)&counter, sizeof(counter),1);
@@ -155,6 +171,37 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
 
 void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 {
+	if(!args)
+	{
+		printf("\nERR:Invalid Log Filename!\n");
+		pthread_exit(NULL);
+	}
+	char *fname = (char*)args;
+	FILE *fp;
+	//fp = fopen(fname,w+);
+	if(!(fp= fopen(fname,"w+")))
+	{
+		printf("\nERR:Invalid Log Filename fp!\n");
+		pthread_exit(NULL);
+	} 
+
+	//Wait on temperature Thread to log
+	pthread_cond_wait(&sig_logger, &logger_mutex);
+
+    int status =0;
+    logpacket temp; 
+    status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
+        printf("\nLog Status %d\n",status);
+        if(status >0)
+        {
+            printf("\nLog Queue message received\n");
+            printf("\n%d\n",strlen((char*)temp_tempo.logmsg));
+            fwrite((char*)temp_tempo.logmsg,1, strlen((char*)temp_tempo.logmsg)*sizeof(char),fp);
+        } 
+
+	printf("\nExiting logger Thread\n");
+	fclose(fp);
+	pthread_exit(NULL);
 	//Handle Log Requests
 	//Send heartbeat notif when requested
 	//Log essentials/ errors
@@ -176,8 +223,8 @@ uint8_t monitor_hb_notif()
     if(req_cnt == LIGHT_HB_CHECK_CNT)
     {
         status=mq_send(hb_light_queue, (const char*)&hb_light_cnt, sizeof(counter),1);
-        light_flag = 1;
         printf("\nStatus is %d",status);
+        light_flag = 1;
         if(status == -1)
         {
             printf("\nUnable to send Heartbeat Notification\n");
@@ -187,6 +234,7 @@ uint8_t monitor_hb_notif()
         {
             printf("\nSuccessfully sent Heartbeat Notification to Light sensor\n");   
         }
+
     }
 
     if(req_cnt == TEMP_HB_CHECK_CNT)
@@ -243,11 +291,35 @@ uint8_t monitor_hb_notif()
 
 int main(int argc, char **argv)
 {
+    
+    if (argc < 2)
+    {
+      printf("USAGE:  <log filename>\n");
+      exit(1);
+    }
+    char *logfname = malloc(50 *sizeof(char));
+    if(!logfname)
+    {
+    	printf("\nERR:Malloc Failed!\n");
+		return 1;
+
+    }
+    if(!memcpy(logfname,argv[1],strlen(argv[1])))
+  	{
+  		printf("\nERR:Memcpy Failed!\n");
+		return 1;
+  	}
+    
+    printf("%ld",sizeof(argv[1]));
+    //strncpy(logfname,argv[1],sizeof(argv[1]));
+    printf("%s",logfname);
+   // exit(0);
+
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     int temp_counter = 659;
     int status;
-
+  
     uint32_t usecs_send;
     usecs_send = 4000000;
     uint32_t usecs_total = 4000000;
@@ -256,17 +328,19 @@ int main(int argc, char **argv)
 
     signal(SIGINT, exit_handler);
     counter = 0;
-    mq_attr_queue.mq_maxmsg = 50;
+    mq_attr_queue.mq_maxmsg = 10;
     mq_attr_queue.mq_msgsize = sizeof(counter);
 
-   // mq_attr_hb_queue.mq_maxmsg = 10;
-   // mq_attr_hb_queue.mq_msgsize = sizeof(counter);
+    mq_attr_log_queue.mq_maxmsg = 10;
+    mq_attr_log_queue.mq_msgsize = sizeof(logpacket);
 
 
     msg_queue = mq_open(MSG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
+
+    // To improve efficiency of space. Stop using counter as the size of each message
     hb_temp_queue = mq_open(HB_TEMP_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
     hb_light_queue = mq_open(HB_LIGHT_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
-   // hb_log_queue = mq_open(HB_LOG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_hb_queue);
+    hb_log_queue = mq_open(HB_LOG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
 
     if(msg_queue == -1)
     {
@@ -285,13 +359,24 @@ int main(int argc, char **argv)
         printf("\nUnable to open message queue! Exiting\n");
         exit(0);
     }
-/*     
+
+    if(pthread_cond_init(&sig_logger,NULL))
+    {
+    	printf("\nERR: Failure to init condition\n");
+    	
+    }
+    
+    if(pthread_mutex_init(&logger_mutex,NULL))
+    {
+    	printf("\nERR: Failure to init condition\n");
+    	
+    }
+     
     if(hb_log_queue == -1)
     {
         printf("\nUnable to open message queue! Exiting\n");
         exit(0);
     } 
-*/
     //To modify attributes to improve scheduling efficiency and task synchronization
 
     /* Creating Temp Sensor Thread */
@@ -309,7 +394,7 @@ int main(int argc, char **argv)
     }
     
     /* Creating Synchronization Logger Thread */
-    if(pthread_create(&synclogger_thread, &attr, (void*)&app_lightsensor_task, NULL))
+    if(pthread_create(&synclogger_thread, &attr, (void*)&app_sync_logger, logfname))
     {
     	printf("\nERR: Failure to create thread\n");
     	//Log Error 
@@ -330,8 +415,8 @@ int main(int argc, char **argv)
 
     }
     //Synchronization with the main thread
-    pthread_join(tempsensor_thread, NULL);
- 	pthread_join(lightsensor_thread, NULL);
+    //pthread_join(tempsensor_thread, NULL);
+ 	//pthread_join(lightsensor_thread, NULL);
 	pthread_join(synclogger_thread, NULL);
     exit_handler(SIGINT);
 	return 0;
