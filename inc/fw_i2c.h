@@ -38,7 +38,7 @@ enum Status {SUCCESS,FAIL} stat;
 ​ * ​ ​ Returns nothing
 ​ * ​ ​
 ​ */
-void i2c_init();
+void i2c_init(uint8_t addr,char *file);
 
 /**
 ​ * ​ ​ @brief​ : Function to write to an I2C Device File
@@ -46,7 +46,7 @@ void i2c_init();
 ​ * ​ ​ Returns a status of type Status to indicate write Fail or Success
 ​ * ​ ​
 ​ */
-enum Status i2c_write();
+enum Status i2c_write(uint8_t *val);
 
 /**
 ​ * ​ ​ @brief​ : Function to read from an I2C Device File
@@ -54,6 +54,6 @@ enum Status i2c_write();
 ​ * ​ ​ Returns a status of type Status to indicate read Fail or Success
 ​ * ​ ​
 ​ */
-enum Status i2c_read();
+enum Status i2c_read(uint8_t *val);
 
 #endif
