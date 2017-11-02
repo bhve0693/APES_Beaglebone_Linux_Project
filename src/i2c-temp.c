@@ -10,8 +10,9 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
-#include <stdlib.h> 
-#include "../inc/fw_i2c.h"
+#include "fw_i2c.h"
+#include "i2c_temp.h"
+
 
 #define PTR_REG 0x00
 #define TEMP_REG 0x00
@@ -41,63 +42,73 @@ int file;
 	}
 	return op_config;
 }
-
-float config_temp()
+*/
+float temp_read()
 {
-	return resolution value=0.0625;
+	int fd=open("/dev/i2c-2",O_RDWR);
+	uint8_t buf = 0x00;
+	uint8_t readval;
+	enum Status stat;
+	if(fd<0)
+	{
+		printf("Error opening file:%s\n",strerror(errno));
+		exit(1);
+	}
+	stat = i2c_temp_init(fd,DEV_ADDR);
+	if(!stat)
+	{
+		printf("\nSuccessful ioctl() operation\n");
+	}
+	else 
+	{
+		printf("\nFailed ioctl() operation:%s\n",strerror(errno));
+		exit(1);
+	}
+	stat = i2c_write(fd,&buf);
+	if(!stat)
+	{
+		printf("\nSuccessfully selected temperature register read operation\n");
+	}
+	else 
+	{
+		printf("\nFailed to select temperature register:%s\n",strerror(errno));
+		exit(1);
+	}
+	
+	float temp_celsius = read_tempsense(fd,0.0625);
+	return temp_celsius;
+	close(fd);	
 }
 
-void read_tempsense(float resolution)
+float read_tempsense(uint8_t fd,float resolution)
 {
+	printf("\nentered read_tempsense\n");
 	uint8_t* buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
 	uint16_t high_byte;
 	uint16_t low_byte;
 	uint16_t temperature_value;
 	float temp_celsius,temp_fahrenheit; 
 	enum Status ret;
-	while(1)
+	uint8_t number_of_bytes;
+	ret = i2c_read(fd,buffer);
+	if(ret)	
+		printf("\nError reading temperature sensor value into register\n");
+	else
 	{
-		ret = i2c_read(buffer);
-		if(!ret)
-			printf("\nError reading temperature sensor value into register\n");
-		else
-		{
-			high_byte = buffer[0];
-			low_byte = buffer[1];
-			temperature_value=((high_byte<<8)|low_byte)>>4;
-			temp_celsius = temperature_value*resolution;
-			temp_fahrenheit = (1.8*temp_celsius)+32;
-		}
-
+		high_byte = buffer[0];
+		low_byte = buffer[1];
 	}
-
-}*/
-
-int main(int argc, char argv[])
-{
-	//fill in the value returned on running i2cdetect -l
-	char *filename = "/dev/i2c-2";
-	i2c_init(DEV_ADDR,filename);
-	//float resolution_value;
-	//uint8_t operation = select_op(0);
-	/*if(operation)
-	{
-		i2c_write(&operation);
-	}
-	if(!operation)
-	{
-		read_tempsense(resolution_value);
-	}*/
-	uint8_t buf = 0x44;
-	uint8_t readval;
-	if(!(i2c_write(&buf)))
-	{
-		perror("Error writing byte 1\n");
-	}
-	if(!(i2c_read(&readval)))
-	{
-		perror("Error reading byte 1\n");
-	}
+	temperature_value=((high_byte<<8)|low_byte)>>4;
+	temp_celsius = temperature_value*resolution;
+	//temp_fahrenheit = (1.8*temp_celsius)+32;
+	//printf("\n%fC,%fF\n",temp_celsius,temp_fahrenheit); 
+	free(buffer);
+	return temp_celsius;
 
 }
+
+/*int main(int argc, char argv[])
+{
+	temp_read();
+}*/
 

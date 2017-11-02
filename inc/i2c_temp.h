@@ -22,47 +22,20 @@
 
 #include <stdio.h>
 
-
-/*
-​ * ​ ​ @brief​    : Enum for indicating I2C read/write status
-​
- *   FAIL      : Data R/W failed
- *   SUCCESS   : Data R/W Success
- 
-​ */
-enum Status {SUCCESS,FAIL} stat;
-
 /**
-​ * ​ ​ @brief​ : To initialize I2C Application driver
+​ * ​ ​ @brief​ : Returns the temperature read from temperature register
 ​ *
-​ * ​ ​ Returns status indicating init success or fail
-​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
- *	 @param : addr -I2C Slave Address ​ 
+​ * ​ ​ Returns value of float data type
 ​ */
-enum Status i2c_temp_init(uint8_t fd,uint8_t addr);
-
-/**
-​ * ​ ​ @brief​ : Function to write to an I2C Device File
-​ *
-​ * ​ ​ Returns a status of type Status to indicate write Fail or Success
-​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
- *	 @param : val - value to be written to file
- *    
-​ */
-enum Status i2c_write(uint8_t fd,uint8_t *val);
-
-/**
-​ * ​ ​ @brief​ : Function to read from an I2C Device File
-​ *
-​ * ​ ​ Returns a status of type Status to indicate read Fail or Success
-​ * ​  ​@param : fd  - accepts I2C Device file descriptor
- *	 @param : val - value to be written to file ​ ​
-​ */
-
-enum Status i2c_read(uint8_t fd,uint8_t *val);
-
 float temp_read();
 
+/**
+​ * ​ ​ @brief​ : Calculates the temperature in Celsius and Fahrenheit 
+​ *
+​ * ​ ​ Returns value of float data type
+​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
+ *	 @param : addr -Resolution value
+​ */
 float read_tempsense(uint8_t fd,float resolution);
 
 #endif
