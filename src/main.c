@@ -21,6 +21,8 @@
 #include <errno.h>
 #include <string.h>
 #include "message.h"
+#include "fw_i2c.h"
+#include "i2c_temp.h"
 
 
 #define MSG_QUEUE "/msg_queue"
@@ -93,7 +95,14 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     printf("\nIn Temperature Sensor Thread execution\n");
     
     //Creating Log message in logpacket
-    msg_tempsensor.logmsg = (char*)" Message from Temp Sensor";
+    float temp_value = temp_read();
+    char *temp_buff = (char*)malloc(sizeof(float));
+    if(!temp_buff)
+    {
+    	printf("\nERR:Malloc Error");
+    }
+    sprintf(temp_buff,"%f",temp_value);
+    msg_tempsensor.logmsg = (char*)temp_buff;
     status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
     if(status == -1)
     {
@@ -195,8 +204,8 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
         if(status >0)
         {
             printf("\nLog Queue message received\n");
-            printf("\n%d\n",strlen((char*)temp_tempo.logmsg));
-            fwrite((char*)temp_tempo.logmsg,1, strlen((char*)temp_tempo.logmsg)*sizeof(char),fp);
+            printf("\n%d\n",strlen((char*)temp.logmsg));
+            fwrite((char*)temp.logmsg,1, strlen((char*)temp.logmsg)*sizeof(char),fp);
         } 
 
 	printf("\nExiting logger Thread\n");

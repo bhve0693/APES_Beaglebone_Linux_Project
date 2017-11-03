@@ -9,7 +9,7 @@
 
 
 INCLUDE_DIRS = -Iinc
-CC=gcc
+CC=arm-linux-gnueabihf-gcc
 
 CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread
 LIBS =  -lrt
@@ -28,8 +28,15 @@ OBJECTS = $(patsubst %.c,%.o,$(SRCS))
 all:	${OUTPUT}
 
 #OUTPUT to be filled later on
+
+i2c_drive.o:$(OBJECTS)
+	$(CC) $(CFLAGS) -o $@ i2c-drive.o $(LIBS)
+
+i2c_temp.o:$(OBJECTS)
+	$(CC) $(CFLAGS) -o $@ i2c-temp.o $(LIBS)
+
 main_exec:$(OBJECTS)
-	$(CC) $(CFLAGS) -o $@ main.o $(LIBS)
+	$(CC) $(CFLAGS) -o $@ main.o i2c-drive.o i2c-temp.o $(LIBS)
 
 #i2c_drive:$(OBJECTS)
 #	$(CC) $(CFLAGS) -o $@ i2c-drive.o $(LIBS)
