@@ -9,7 +9,7 @@
 
 
 INCLUDE_DIRS = -Iinc
-CC=arm-linux-gnueabihf-gcc
+CC=gcc
 
 CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread
 LIBS =  -lrt

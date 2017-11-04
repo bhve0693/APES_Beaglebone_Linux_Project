@@ -34,7 +34,9 @@
 #define LOG_HB_CHECK_CNT   3
 
 #define HB_LOG_QUEUE "/hb_log_queue"
+#define MAX_LOG_SIZE     9999
 
+char logbuff[MAX_LOG_SIZE];
 pthread_t tempsensor_thread;
 pthread_t lightsensor_thread;
 pthread_t synclogger_thread;
@@ -95,20 +97,27 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     printf("\nIn Temperature Sensor Thread execution\n");
     
     //Creating Log message in logpacket
-    float temp_value = temp_read();
+    //float temp_value = temp_read();
+    float temp_value = 32.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
     {
     	printf("\nERR:Malloc Error");
     }
     sprintf(temp_buff,"%f",temp_value);
-    msg_tempsensor.logmsg = (char*)temp_buff;
-    status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
-    if(status == -1)
+    //msg_tempsensor.msg_size = strlen(temp_buff);
+    msg_tempsensor.logmsg = NULL;
+    msg_tempsensor.logmsg = (uint8_t*)temp_buff;
+    msg_tempsensor.sourceid = SRC_TEMPERATURE;
+    if(msg_tempsensor.logmsg != NULL)
     {
-        printf("\ntemp was unable to send log message\n");
+        status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+        if(status == -1)
+        {
+            printf("\ntemp was unable to send log message\n");
+        }
+        pthread_cond_signal(&sig_logger);
     }
-    pthread_cond_signal(&sig_logger);
 
     while(1)
     {
@@ -199,14 +208,28 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
     int status =0;
     logpacket temp; 
+    temp.logmsg = NULL;
     status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
         printf("\nLog Status %d\n",status);
-        if(status >0)
+        if(temp.logmsg !=NULL)
         {
-            printf("\nLog Queue message received\n");
-            printf("\n%d\n",strlen((char*)temp.logmsg));
-            fwrite((char*)temp.logmsg,1, strlen((char*)temp.logmsg)*sizeof(char),fp);
-        } 
+            if(status >0)
+            {
+                printf("\nLog Queue message received\n");
+                printf("\n%d\n",strlen((char*)temp.logmsg));
+                if(temp.sourceid == SRC_LIGHT)
+                {
+                    sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
+                }
+                else if(temp.sourceid == SRC_TEMPERATURE)
+                {
+                    sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
+                }
+                strncat(logbuff, (char *)temp.logmsg, strlen((char*)temp.logmsg));
+                fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
+            }    
+        }
 
 	printf("\nExiting logger Thread\n");
 	fclose(fp);
