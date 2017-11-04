@@ -41,7 +41,8 @@ loglevel level;        //Log Levels based on criticality of logs
 srcid sourceid;         //Source of Logs 
 int32_t crc;           //CRC check for error checking mechanism   
 //size_t msg_size;
-uint8_t *logmsg;          //Message to be logged: void * due to flexibile data type requirment
+char logmsg[256];
+//uint8_t *logmsg;          //Message to be logged: void * due to flexibile data type requirment
 }logpacket;
 
 

@@ -61,7 +61,7 @@ static mqd_t msg_queue;
 static mqd_t hb_temp_queue;
 static mqd_t hb_light_queue;
 static mqd_t hb_log_queue;
-
+FILE *fp;
 //static unsigned int counter;
 static volatile sig_atomic_t counter =0;
 logpacket msg_tempsensor,msg_lightsensor, msg_synclogger;
@@ -84,6 +84,9 @@ void exit_handler(int sig) {
     mq_unlink(HB_LIGHT_QUEUE);
     mq_close(hb_temp_queue);
     mq_unlink(HB_TEMP_QUEUE);
+    mq_close(hb_log_queue);
+    mq_unlink(HB_LOG_QUEUE);
+    fclose(fp);
     exit(0);
 }
 
@@ -104,7 +107,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     {
     	printf("\nERR:Malloc Error");
     }
-    sprintf(temp_buff,"%f",temp_value);
+    /*sprintf(temp_buff,"%f",temp_value);
     //msg_tempsensor.msg_size = strlen(temp_buff);
     gettimeofday(&msg_tempsensor.time_stamp, NULL);
     msg_tempsensor.logmsg = NULL;
@@ -119,7 +122,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
         }
         pthread_cond_signal(&sig_logger);
     }
-
+    */
     while(1)
     {
         status=mq_send(msg_queue, (const char*)&counter, sizeof(counter),1);
@@ -127,6 +130,24 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
         {
             exit_handler(SIGINT);
         }
+        sprintf(temp_buff,"%f",temp_value);
+    //msg_tempsensor.msg_size = strlen(temp_buff);
+        gettimeofday(&msg_tempsensor.time_stamp, NULL);
+        //msg_tempsensor.logmsg = NULL;
+        strcpy(msg_tempsensor.logmsg,temp_buff);
+        printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
+        msg_tempsensor.sourceid = SRC_TEMPERATURE;
+        if(msg_tempsensor.logmsg != NULL)
+        {
+            status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+            if(status == -1)
+            {
+                printf("\ntemp was unable to send log message\n");
+            }
+            pthread_cond_signal(&sig_logger);
+        }
+        temp_value++;
+
         usleep(usecs);
         if(temp_flag)
         {
@@ -157,7 +178,7 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
     usecs = 10000;
     printf("\nIn Light Sensor Thread execution\n");
     printf("\nRecvcounter is %d\n",recvcounter);
-    float temp_value = 38.02;
+    /*float temp_value = 38.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
     {
@@ -177,7 +198,7 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
             printf("\ntemp was unable to send log message\n");
         }
        // pthread_cond_signal(&sig_logger);
-    }
+    }*/
 
     while(1)
     {
@@ -218,20 +239,23 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 		pthread_exit(NULL);
 	}
 	char *fname = (char*)args;
-	FILE *fp;
+	
 	//fp = fopen(fname,w+);
 	if(!(fp= fopen(fname,"w+")))
 	{
 		printf("\nERR:Invalid Log Filename fp!\n");
 		pthread_exit(NULL);
 	} 
-
+    uint32_t usecs;
+    usecs = 2000000;
 	//Wait on temperature Thread to log
+    while(1)
+    {
 	pthread_cond_wait(&sig_logger, &logger_mutex);
 
     int status =0;
     logpacket temp; 
-    temp.logmsg = NULL;
+    //temp.logmsg = NULL;
     status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
         printf("\nLog Status %d\n",status);
         if(temp.logmsg !=NULL)
@@ -239,7 +263,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
             if(status >0)
             {
                 printf("\nLog Queue message received\n");
-                printf("\n%d\n",strlen((char*)temp.logmsg));
+               // printf("\n%d\n",strlen((char*)temp.logmsg));
                 if(temp.sourceid == SRC_LIGHT)
                 {
                     sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
@@ -250,13 +274,13 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
                     //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
                 }
-                strncat(logbuff, (char *)temp.logmsg, strlen((char*)temp.logmsg));
+                strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
             }    
         }
-
-        status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
+        usleep(usecs);
+        /*status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
         printf("\nLog Status %d\n",status);
         if(temp.logmsg !=NULL)
         {
@@ -278,8 +302,8 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
             }    
-        }
-
+        }*/
+    }    
 	printf("\nExiting logger Thread\n");
 	fclose(fp);
 	pthread_exit(NULL);
