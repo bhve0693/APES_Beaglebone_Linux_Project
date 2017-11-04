@@ -36,7 +36,7 @@ SRC_DEFAULT
 
 //Log Packet
 typedef struct log_packet_t{
-struct timeval *time_stamp;  //Timestamps use time.h
+struct timeval time_stamp;  //Timestamps use time.h
 loglevel level;        //Log Levels based on criticality of logs
 srcid sourceid;         //Source of Logs 
 int32_t crc;           //CRC check for error checking mechanism   

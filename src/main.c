@@ -98,7 +98,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     
     //Creating Log message in logpacket
     //float temp_value = temp_read();
-    float temp_value = 32.02;
+    float temp_value = 35.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
     {
@@ -106,6 +106,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     }
     sprintf(temp_buff,"%f",temp_value);
     //msg_tempsensor.msg_size = strlen(temp_buff);
+    gettimeofday(&msg_tempsensor.time_stamp, NULL);
     msg_tempsensor.logmsg = NULL;
     msg_tempsensor.logmsg = (uint8_t*)temp_buff;
     msg_tempsensor.sourceid = SRC_TEMPERATURE;
