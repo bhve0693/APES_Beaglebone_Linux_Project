@@ -157,6 +157,28 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
     usecs = 10000;
     printf("\nIn Light Sensor Thread execution\n");
     printf("\nRecvcounter is %d\n",recvcounter);
+    float temp_value = 38.02;
+    char *temp_buff = (char*)malloc(sizeof(float));
+    if(!temp_buff)
+    {
+        printf("\nERR:Malloc Error");
+    }
+    sprintf(temp_buff,"%f",temp_value);
+    //msg_tempsensor.msg_size = strlen(temp_buff);
+    gettimeofday(&msg_lightsensor.time_stamp, NULL);
+    msg_lightsensor.logmsg = NULL;
+    msg_lightsensor.logmsg = (uint8_t*)temp_buff;
+    msg_lightsensor.sourceid = SRC_LIGHT;
+    if(msg_lightsensor.logmsg != NULL)
+    {
+        status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+        if(status == -1)
+        {
+            printf("\ntemp was unable to send log message\n");
+        }
+       // pthread_cond_signal(&sig_logger);
+    }
+
     while(1)
     {
         
@@ -220,11 +242,37 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                 printf("\n%d\n",strlen((char*)temp.logmsg));
                 if(temp.sourceid == SRC_LIGHT)
                 {
-                    sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
+                    sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                   // sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
                 }
                 else if(temp.sourceid == SRC_TEMPERATURE)
                 {
-                    sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
+                    sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
+                }
+                strncat(logbuff, (char *)temp.logmsg, strlen((char*)temp.logmsg));
+                fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
+            }    
+        }
+
+        status = mq_receive(hb_log_queue,(logpacket*)&temp, sizeof(temp), NULL);
+        printf("\nLog Status %d\n",status);
+        if(temp.logmsg !=NULL)
+        {
+            if(status >0)
+            {
+                printf("\nLog Queue message received\n");
+                printf("\n%d\n",strlen((char*)temp.logmsg));
+                if(temp.sourceid == SRC_LIGHT)
+                {
+                    sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    //sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
+                }
+                else if(temp.sourceid == SRC_TEMPERATURE)
+                {
+                    sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
                 }
                 strncat(logbuff, (char *)temp.logmsg, strlen((char*)temp.logmsg));
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
