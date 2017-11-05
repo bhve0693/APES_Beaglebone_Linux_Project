@@ -1,5 +1,3 @@
-/*Refer https://www.kernel.org/doc/Documentation/i2c/dev-interface*/
-/*https://elinux.org/Interfacing_with_I2C_Devices*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -9,9 +7,11 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
+#include <pthread.h>
 #include <stdint.h>
-#include "fw_i2c.h"
-#include "i2c_temp.h"
+#include <signal.h>
+#include "../inc/fw_i2c.h"
+#include "../inc/i2c_temp.h"
 
 
 #define PTR_REG 0x00
@@ -19,96 +19,316 @@
 #define CONFIG_REG 0x01
 #define TLOW_REG 0x02
 #define THIGH_REG 0x03
-
+#define READ 0x01
+#define WRITE 0x00
+#define SHUTDOWN_ENABLE 0x0100
+#define ENABLE_25 0x00
+#define ENABLE_1 0x40
+#define ENABLE_4 0x80
+#define ENABLE_8 0xC0
 #define DEV_ADDR 0x48
 
-int file;
 
-//To check which i2c adapter needs to be accessed, run i2cdetect -l
-/*uint8_t select_op(int opt)
+enum Status read_temp_reg(uint8_t fd,uint8_t reg,uint16_t *val)
 {
-	uint8_t op_config;
-	switch(opt)
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
+	stat = i2c_write(fd,&reg);
+	if(!stat)
 	{
-		case 0:  opconfig = PTR_REG|TEMP_REG;
-				 break;
-		case 1:  opconfig = PTR_REG|CONFIG_REG;
-				 break;
-		case 2:  opconfig = PTR_REG|TLOW_REG;
-				 break;
-		case 3:  opconfig = PTR_REG|THIGH_REG;
-				 break;
-		default: printf("\nInvalid operation selection\n");
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
 	}
-	return op_config;
+	free(buffer);
+	return stat;
+
 }
-*/
-float temp_read()
+
+enum Status read_config_reg(uint8_t fd,uint8_t reg,uint16_t *val)
 {
-	int fd=open("/dev/i2c-2",O_RDWR);
-	uint8_t buf = 0x00;
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(2*sizeof(uint8_t));
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
+	}
+	free(buffer);
+	
+	return stat;
+	
+}
+
+enum Status read_tlow_reg(uint8_t fd,uint8_t reg,uint16_t *val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
+	}
+	return stat;
+	free(buffer);
+}
+
+
+enum Status read_thigh_reg(uint8_t fd,uint8_t reg,uint16_t *val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
+	}
+	return stat;
+	free(buffer);
+}
+
+
+enum Status write_ptr_reg(uint8_t fd,uint8_t reg)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	return stat;
+}
+
+enum Status write_config_reg(uint8_t fd,uint8_t reg,uint16_t value)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(3*sizeof(uint8_t));
+	buffer[0] = reg;
+	buffer[1] = (uint8_t)((value & 0xFF00)>>8);
+	buffer[2] = (uint8_t)(value & 0x00FF);
+	stat = i2c_write_word(fd,buffer);
+	free(buffer);
+	return stat;
+}
+
+enum Status write_tlow_reg(uint8_t fd,uint8_t reg,uint16_t value)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(3*sizeof(uint8_t));
+	buffer[0] = reg;
+	buffer[1] = (uint8_t)((value & 0xFF00)>>8);
+	buffer[2] = (uint8_t)(value & 0x00FF);
+	stat = i2c_write_word(fd,buffer);
+	free(buffer);
+	return stat;
+	
+}
+
+enum Status write_thigh_reg(uint8_t fd,uint8_t reg,uint16_t value)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)malloc(3*sizeof(uint8_t));
+	buffer[0] = reg;
+	buffer[1] = (uint8_t)((value & 0xFF00)>>8);
+	buffer[2] = (uint8_t)(value & 0x00FF);
+	stat = i2c_write_word(fd,buffer);
+	free(buffer);
+	return stat;	
+}
+
+
+enum Status read_temp_register(uint8_t fd,uint8_t reg_option,uint16_t *val)
+{
+	enum Status stat;
+	uint8_t value,addr;
+	switch(reg_option)
+	{
+		case 1: addr = PTR_REG|TEMP_REG;
+				stat = read_temp_reg(fd,addr,val);
+				break;
+
+		case 2: addr = PTR_REG|CONFIG_REG;
+				stat = read_config_reg(fd,addr,val);
+				break;
+
+		case 3: addr = PTR_REG|TLOW_REG;
+				stat = read_tlow_reg(fd,addr,val);
+				break;
+
+		case 4: addr = PTR_REG|THIGH_REG;
+				stat = read_thigh_reg(fd,addr,val);
+				break;
+
+		default:stat = FAIL;
+				printf("\nERR:Incorrect register chosen to read\n");	
+	}
+
+	return stat;
+}
+
+
+enum Status continuous_conversion_mode(uint8_t fd,uint8_t option)
+{
+	uint16_t config_val;
+
+	stat = read_temp_register(fd,2,&config_val);
+	if(!option)
+	{
+		config_val &= ~ENABLE_4;
+		config_val |= ENABLE_25;
+		printf("\nConversion rate of 0.25Hz enabled:%4x\n",config_val);
+
+	}
+	else if(option==1) 
+	{
+		config_val &= ~ENABLE_4;
+		config_val |= ENABLE_1;
+		printf("\nConversion rate of 1Hz enabled:%4x\n",config_val);
+	}
+	else if(option==2) 
+	{
+		config_val &= ~ENABLE_4;
+		config_val |= ENABLE_4;
+		printf("\nConversion rate of 4Hz enabled:%4x\n",config_val);
+	}
+	else if(option==3) 
+	{
+		config_val &= ~ENABLE_4;
+		config_val |= ENABLE_8;
+		printf("\nConversion rate of 8Hz enabled:%4x\n",config_val);
+	}
+	else
+	{
+		printf("\nInvalid option....setting rate to 4Hz default:%4x\n",config_val);
+	}
+}
+
+enum Status shutdown_temp_mode(uint8_t fd,uint8_t option)
+{
+	uint16_t config_val;
+	stat = read_temp_register(fd,2,&config_val);
+	if(option==1)
+	{
+		config_val |= SHUTDOWN_ENABLE;
+		printf("\nShutdown enabled:%4x\n",config_val);
+
+	}
+	else 
+	{
+		config_val &= ~SHUTDOWN_ENABLE;
+		printf("\nShutdown disabled:%4x\n",config_val);
+	}
+}
+
+
+enum Status write_temp_register(uint8_t fd,uint8_t reg_option,uint16_t val)
+{
+	enum Status stat;
+	switch(reg_option)
+	{
+		case 0:	if(val>3)
+				{	
+					printf("ERR:Pointer register is 8 bits long with higher 6 bits set to 0\n");
+					stat = FAIL;
+				}
+				else stat = write_ptr_reg(fd,val);
+				break;
+
+		case 2:	stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);
+				break;
+
+		case 3: stat = write_tlow_reg(fd,PTR_REG|TLOW_REG,val);
+				break;
+		
+		case 4: stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
+				break;
+		
+		default:stat = FAIL;
+				printf("\nERR:Incorrect register chosen to write\n");	
+	}
+	return stat;
+}
+
+
+
+float temp_read(uint8_t fd,uint8_t unit_choice)
+{
+	uint8_t operation;
 	uint8_t readval;
 	enum Status stat;
-	if(fd<0)
-	{
-		printf("Error opening file:%s\n",strerror(errno));
-		exit(1);
-	}
-	stat = i2c_temp_init(fd,DEV_ADDR);
-	if(!stat)
-	{
-		printf("\nSuccessful ioctl() operation\n");
-	}
-	else 
-	{
-		printf("\nFailed ioctl() operation:%s\n",strerror(errno));
-		exit(1);
-	}
-	stat = i2c_write(fd,&buf);
-	if(!stat)
-	{
-		printf("\nSuccessfully selected temperature register read operation\n");
-	}
-	else 
+	uint8_t *buf = (uint8_t*)malloc(sizeof(uint8_t)*2);
+
+	stat = i2c_write(fd,buf);
+	if(stat)
 	{
 		printf("\nFailed to select temperature register:%s\n",strerror(errno));
 		exit(1);
 	}
-	
-	float temp_celsius = read_tempsense(fd,0.0625);
+
+	float temp_celsius = read_tempsense(fd,0.0625,unit_choice);
+	free(buf);
 	return temp_celsius;
-	close(fd);	
+	
 }
 
-float read_tempsense(uint8_t fd,float resolution)
+float celsius(float temp_celsius)
 {
-	printf("\nentered read_tempsense\n");
+	return temp_celsius;
+}
+
+float fahrenheit(float temp_fahrenheit)
+{
+	return temp_fahrenheit;
+}
+
+float kelvin(float temp_kelvin)
+{
+	return temp_kelvin;
+}
+
+
+float read_tempsense(uint8_t fd,float resolution,uint8_t unit_choice)
+{
+
 	uint8_t* buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
 	uint16_t high_byte;
 	uint16_t low_byte;
 	uint16_t temperature_value;
-	float temp_celsius,temp_fahrenheit; 
+	float temp_celsius,temp_fahrenheit,temp_kelvin; 
 	enum Status ret;
 	uint8_t number_of_bytes;
-	ret = i2c_read(fd,buffer);
+	ret = i2c_read_word(fd,buffer);
 	if(ret)	
 		printf("\nError reading temperature sensor value into register\n");
+
 	else
 	{
 		high_byte = buffer[0];
 		low_byte = buffer[1];
+		temperature_value=((high_byte<<8)|low_byte)>>4;
+		if(high_byte & 0x80)
+		{
+			printf("\nNegative temperature value detected..\n");
+			temperature_value=((high_byte<<8)|low_byte)>>4;
+			temperature_value = (~temperature_value)+1;
+		}
 	}
-	temperature_value=((high_byte<<8)|low_byte)>>4;
+
+	
 	temp_celsius = temperature_value*resolution;
-	//temp_fahrenheit = (1.8*temp_celsius)+32;
-	//printf("\n%fC,%fF\n",temp_celsius,temp_fahrenheit); 
+	temp_fahrenheit = (1.8*temp_celsius)+32;
+	temp_kelvin = temp_celsius+273.15;
+	printf("\n%fC,%fF.%fK\n",temp_celsius,temp_fahrenheit,temp_kelvin); 
 	free(buffer);
-	return temp_celsius;
-
+	if(unit_choice== 0)
+	{
+		return celsius(temp_celsius);
+	}
+	else if(unit_choice==1)
+	{
+		return fahrenheit(temp_fahrenheit);
+	}
+	else if(unit_choice==2)
+	{
+		return kelvin(temp_kelvin);
+	}
 }
-
-/*int main(int argc, char argv[])
-{
-	temp_read();
-}*/
 

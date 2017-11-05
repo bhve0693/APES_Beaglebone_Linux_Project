@@ -52,6 +52,17 @@ enum Status i2c_temp_init(uint8_t fd,uint8_t addr);
 enum Status i2c_write(uint8_t fd,uint8_t *val);
 
 /**
+​ * ​ ​ @brief​ : Function to write to an I2C Device File
+​ *
+​ * ​ ​ Returns a status of type Status to indicate write Fail or Success
+​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
+ *	 @param : val - value to be written to file
+ *    
+​ */
+enum Status i2c_write_word(uint8_t fd,uint8_t *val);
+
+
+/**
 ​ * ​ ​ @brief​ : Function to read from an I2C Device File
 ​ *
 ​ * ​ ​ Returns a status of type Status to indicate read Fail or Success
@@ -61,8 +72,15 @@ enum Status i2c_write(uint8_t fd,uint8_t *val);
 
 enum Status i2c_read(uint8_t fd,uint8_t *val);
 
-float temp_read();
+/**
+​ * ​ ​ @brief​ : Function to read from an I2C Device File
+​ *
+​ * ​ ​ Returns a status of type Status to indicate read Fail or Success
+​ * ​  ​@param : fd  - accepts I2C Device file descriptor
+ *	 @param : val - value to be written to file ​ ​
+​ */
 
-float read_tempsense(uint8_t fd,float resolution);
+enum Status i2c_read_word(uint8_t fd,uint8_t *val);
+
 
 #endif

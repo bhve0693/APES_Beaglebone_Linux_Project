@@ -9,18 +9,22 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
-//#include "../inc/fw_i2c.h"
-#include "fw_i2c.h"
+#include "../inc/fw_i2c.h"
+//#include "fw_i2c.h"
 
 
 //To check which i2c adapter needs to be accessed, run i2cdetect -l
 enum Status i2c_temp_init(uint8_t fd,uint8_t addr)
 {
-	if(ioctl(fd,I2C_SLAVE,addr)<0)
+	if(addr == 0x48 || addr == 0x49 || addr == 0x4A || addr==0x4B)
 	{
-		return FAIL;
+		if(ioctl(fd,I2C_SLAVE,addr)<0)
+		{
+			return FAIL;
+		}
+		return SUCCESS;
 	}
-	return SUCCESS;
+	else return FAIL;
 }
 
 enum Status i2c_write(uint8_t fd,uint8_t *val)
@@ -32,7 +36,16 @@ enum Status i2c_write(uint8_t fd,uint8_t *val)
 	return SUCCESS;
 }
 
-enum Status i2c_read(uint8_t fd,uint8_t *val)
+enum Status i2c_write_word(uint8_t fd,uint8_t *val)
+{
+	if(write(fd,val,3)!=3)
+	{
+		return FAIL;
+	}
+	return SUCCESS;
+}
+
+enum Status i2c_read_word(uint8_t fd,uint8_t *val)
 {
 	if(read(fd,val,2)!=2)
 	{
@@ -41,5 +54,13 @@ enum Status i2c_read(uint8_t fd,uint8_t *val)
 	return SUCCESS;
 }
 
+enum Status i2c_read(uint8_t fd,uint8_t *val)
+{
+	if(read(fd,val,1)!=1)
+	{
+		return FAIL;
+	}
+	return SUCCESS;
+}
 
 
