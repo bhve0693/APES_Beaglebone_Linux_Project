@@ -35,20 +35,28 @@ SRC_DEFAULT
 }srcid;
 
 //Request Task 
+
 typedef enum reqtype_t{
 DEFAULT,
 REQ_TEMP,
 REQ_LUX,
 REQ_REG,
-REQ_TEMPREG,
+REQ_TEMPREG_READ,
+REQ_TEMPREG_PTRREG_WRITE,
+REQ_TEMPREG_DATA_LOW_READ,
+REQ_TEMPREG_DATA_HIGH_READ,
+REQ_TEMPREG_DATA_LOW_WRITE,
+REQ_TEMPREG_DATA_HIGH_WRITE,
 REQ_SHUTDOWN_ENABLE,
+REQ_TEMPREG_CONFIG_READ,
+REQ_TEMPREG_CONFIG_WRITE,
 REQ_SHUTDOWN_DISABLE,
 REQ_POWERON,
 REQ_POWEROFF,
 REQ_SET_INTEGRATION_TIME,
 REQ_INTERRUPT_ENABLE,
 REQ_INTERRUPT_DISABLE,
-REQ_IDREG_READ,
+REQ_IDREG_READ
 }request_t;
 
 //Log Packet
@@ -58,9 +66,7 @@ loglevel level;        //Log Levels based on criticality of logs
 srcid sourceid;         //Source of Logs 
 int32_t crc;           //CRC check for error checking mechanism 
 request_t req_type;  
-//size_t msg_size;
 char logmsg[256];
-//uint8_t *logmsg;          //Message to be logged: void * due to flexibile data type requirment
 }logpacket;
 
 

@@ -24,7 +24,6 @@
 #include "fw_i2c.h"
 #include "i2c_temp.h"
 
-
 #define MSG_QUEUE "/msg_queue"
 #define HB_TEMP_QUEUE "/hb_temp_queue"
 #define HB_LIGHT_QUEUE "/hb_light_queue"
@@ -44,17 +43,22 @@ pthread_t synclogger_thread;
 struct mq_attr mq_attr_queue;
 struct mq_attr mq_attr_hb_queue;
 struct mq_attr mq_attr_log_queue;
-
+struct mq_attr mq_attr_temp_req_queue;
 static volatile sig_atomic_t light_flag = 0;
 static volatile sig_atomic_t temp_flag = 0;
 static volatile sig_atomic_t request_flag_temp = 0;
+static volatile sig_atomic_t req_processed = 0;
 static volatile sig_atomic_t req_cnt = 0;
 
 pthread_cond_t sig_logger;
 pthread_mutex_t logger_mutex;
 pthread_mutex_t msg_temp_mutex;
 pthread_mutex_t msg_light_mutex;
+pthread_cond_t sig_req_process;
+pthread_mutex_t req_process_mutex;
 
+
+uint8_t fd_temp;
 uint8_t hb_temp_cnt;
 uint8_t hb_light_cnt;
 uint8_t hb_synclog_cnt;
@@ -90,10 +94,214 @@ void exit_handler(int sig) {
     mq_unlink(HB_TEMP_QUEUE);
     mq_close(hb_log_queue);
     mq_unlink(HB_LOG_QUEUE);
+    mq_close(temp_req_queue);
+    mq_unlink(HB_TEMP_REQ_QUEUE);
+   // if(fd_temp !=NULL)
+    //fclose(fd_temp);
+    if(fp!=NULL)
     fclose(fp);
     exit(0);
 }
 
+enum Status api_temp_log(logpacket msg)
+{
+    uint8_t status;
+    
+    status=mq_send(hb_log_queue, (const logpacket*)&msg, sizeof(msg),1);
+    if(status == -1)
+    {
+        printf("\ntemp was unable to send log message\n");
+        return FAIL;
+        //ERR_Log();
+    }
+    pthread_cond_signal(&sig_logger);
+
+
+    return SUCCESS;
+
+}
+
+enum Status api_temp_req_hdlr()
+{   
+    logpacket msg_request;
+    logpacket api_req_msg;
+    msg_request.req_type = -1;
+    uint8_t status;
+    char *temp_buff_float = (char*)malloc(sizeof(float));
+    char *temp_buff_uint16 = (char*)malloc(sizeof(uint16_t));
+    uint16_t temp_value_uint16;
+    float temp_value_float;
+    status = mq_receive(temp_req_queue,(logpacket*)&msg_request, sizeof(msg_request), NULL);
+    if(status >0)
+    {
+        printf("\nReceived Request from source\n");
+    }
+    else
+    {
+        return FAIL;
+        //ERR_Log();
+    }
+    printf("\n Message Req Type %d\n",msg_request.req_type);
+    switch(msg_request.req_type)
+    {
+        case REQ_TEMP:
+            temp_value_float = temp_read(fd_temp,0);
+            sprintf(temp_buff_float,"%f",temp_value_float);
+            gettimeofday(&msg_tempsensor.time_stamp, NULL);
+            strcpy(msg_tempsensor.logmsg,temp_buff_float);
+            printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
+            msg_tempsensor.req_type = REQ_TEMP;
+            if(msg_tempsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_tempsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+            }
+            break;
+        case REQ_TEMPREG_CONFIG_READ:
+            printf("\nTEMP: CONFIG REGISTER REQUEST RECVD\n");
+            status = read_temp_register(fd_temp,2,&temp_value_uint16);
+            sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
+            gettimeofday(&api_req_msg.time_stamp, NULL);
+            printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
+            strcpy(api_req_msg.logmsg,temp_buff_uint16);
+            api_req_msg.req_type = REQ_TEMPREG_CONFIG_READ;
+            if(api_req_msg.logmsg != NULL)
+            {
+                if(api_temp_log(api_req_msg))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&api_req_msg, sizeof(api_req_msg),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;
+            }
+            break;
+        case REQ_TEMPREG_READ:
+            printf("\nTEMP :TEMP REGISTER REQUEST RECVD\n");
+            status = read_temp_register(fd_temp,1,&temp_value_uint16);
+            sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
+            gettimeofday(&api_req_msg.time_stamp, NULL);
+            printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
+            strcpy(api_req_msg.logmsg,temp_buff_uint16);
+            api_req_msg.req_type = REQ_TEMPREG_READ;
+            if(api_req_msg.logmsg != NULL)
+            {
+                if(api_temp_log(api_req_msg))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&api_req_msg, sizeof(api_req_msg),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;                        
+                    //ERR_Log();
+                }
+                req_processed = 1;
+                }
+                break;
+
+        case REQ_TEMPREG_DATA_LOW_READ:
+            printf("\nTEMP CONFIG REQUEST RECVD\n");
+            status = read_temp_register(fd_temp,3,&temp_value_uint16);
+            sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
+            gettimeofday(&api_req_msg.time_stamp, NULL);
+            printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
+            strcpy(api_req_msg.logmsg,temp_buff_uint16);
+            api_req_msg.req_type = REQ_TEMPREG_DATA_LOW_READ;
+            if(api_req_msg.logmsg != NULL)
+            {
+                if(api_temp_log(api_req_msg))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&api_req_msg, sizeof(api_req_msg),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;
+            }
+            break;
+        case REQ_TEMPREG_DATA_HIGH_READ:
+            printf("\nTEMP CONFIG REQUEST RECVD\n");
+            status = read_temp_register(fd_temp,4,&temp_value_uint16);
+            sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
+            gettimeofday(&api_req_msg.time_stamp, NULL);
+            printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
+            strcpy(api_req_msg.logmsg,temp_buff_uint16);
+            api_req_msg.req_type = REQ_TEMPREG_DATA_HIGH_READ;
+            if(api_req_msg.logmsg != NULL)
+            {
+                if(api_temp_log(api_req_msg))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&api_req_msg, sizeof(api_req_msg),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;
+            }
+            break;
+
+    }
+                    
+
+    return SUCCESS;
+}
+enum Status init_tempsensor_task()
+{
+    uint8_t status;
+    logpacket msg;
+    fd_temp = open("/dev/i2c-2",O_RDWR);
+    if(fd_temp<0)
+    {
+        printf("\nFailed to Open\n ");
+        return FAIL;
+        //ERR_Log();
+    }
+    status = i2c_temp_init(fd_temp,0x48);
+    if(status)
+    {
+        printf("\nERR:Failed to Init I2C\n ");
+        return FAIL;
+        //ERR_Log();   
+    }
+    msg.sourceid = SRC_TEMPERATURE;
+    msg.level = LOG_INIT;
+    char *init_msg = "TEMP :Initialization Done";
+    strcpy(msg.logmsg,init_msg);
+    api_temp_log(msg);
+
+    return SUCCESS;
+}
 
 void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
 {
@@ -103,97 +311,58 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     logpacket msg_request;
     usecs = 1000000;
     printf("\nIn Temperature Sensor Thread execution\n");
-    
     //Creating Log message in logpacket
-    //float temp_value = temp_read();
-    float temp_value = 35.02;
+    status = init_tempsensor_task();
+    if(status)
+    {
+        printf("\nTemp Sensor Init Failed\n");
+        //ERR_Log();
+        //Log Error in Log Queue
+    }
+    
+    float temp_value;
+    //float temp_value = 35.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
     {
     	printf("\nERR:Malloc Error");
+        //ERR_Log();
     }
-    /*sprintf(temp_buff,"%f",temp_value);
-    //msg_tempsensor.msg_size = strlen(temp_buff);
-    gettimeofday(&msg_tempsensor.time_stamp, NULL);
-    msg_tempsensor.logmsg = NULL;
-    msg_tempsensor.logmsg = (uint8_t*)temp_buff;
-    msg_tempsensor.sourceid = SRC_TEMPERATURE;
-    if(msg_tempsensor.logmsg != NULL)
-    {
-        status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
-        if(status == -1)
-        {
-            printf("\ntemp was unable to send log message\n");
-        }
-        pthread_cond_signal(&sig_logger);
-    }
-    */
     while(1)
     {
         status=mq_send(msg_queue, (const char*)&counter, sizeof(counter),1);
         if(status == -1)
         {
             exit_handler(SIGINT);
+            //ERR_Log();
         }
+        temp_value = temp_read(fd_temp,0);
         sprintf(temp_buff,"%f",temp_value);
-    //msg_tempsensor.msg_size = strlen(temp_buff);
         gettimeofday(&msg_tempsensor.time_stamp, NULL);
-        //msg_tempsensor.logmsg = NULL;
         strcpy(msg_tempsensor.logmsg,temp_buff);
         printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
         msg_tempsensor.sourceid = SRC_TEMPERATURE;
         if(msg_tempsensor.logmsg != NULL)
         {
-            status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
-            if(status == -1)
+            if(api_temp_log(msg_tempsensor))
             {
                 printf("\ntemp was unable to send log message\n");
+                //ERR_log();
             }
-            pthread_cond_signal(&sig_logger);
+
         }
-        temp_value++;
         usleep(usecs);
         if(request_flag_temp)
         {
-            status = mq_receive(temp_req_queue,(char*)&msg_request, sizeof(msg_request), NULL);
-            if(status >0)
+            printf("\nRequest Flag Set\n");
+            if(api_temp_req_hdlr())
             {
-                printf("/nReceived Request from source\n");
+                printf("\nERR: TEMP Task Unable to Handle Request\n");
+                //ERR_log();
             }
             request_flag_temp = 0;
-
-
-            sprintf(temp_buff,"%f",temp_value);
-    //msg_tempsensor.msg_size = strlen(temp_buff);
-            gettimeofday(&msg_tempsensor.time_stamp, NULL);
-        //msg_tempsensor.logmsg = NULL;
-        //strcpy(msg_tempsensor.logmsg,temp_buff);
-        printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
-        msg_tempsensor.req_type = REQ_REG;
-        //msg_tempsensor.sourceid = SRC_TEMPERATURE;
-        if(msg_tempsensor.logmsg != NULL)
-        {
-            status=mq_send(hb_log_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
-            if(status == -1)
-            {
-                printf("\ntemp was unable to send log message\n");
-            }
-            pthread_cond_signal(&sig_logger);
         }
 
-
-
-            
-
-        }
-        /*if(request_flag)
-        {
-            status = mq_receive(temp_req_queue,(char*)&temp_count, sizeof(counter), NULL);
-            if(status >0)
-            {
-                printf("/nReceived Request from ")
-            }
-        }*/
         if(temp_flag)
         {
             status = mq_receive(hb_temp_queue,(char*)&temp_count, sizeof(counter), NULL);
@@ -318,12 +487,47 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                 }
                 else if(temp.sourceid == SRC_TEMPERATURE)
                 {
-                    sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    if(temp.level == LOG_INIT)
+                    {
+                        strcpy(logbuff,temp.logmsg);
+                    }
+                    else
+                    {
+                        sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    }    
                     //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
                 }
-                if(temp.req_type == REQ_REG)
+                if(temp.req_type == REQ_POWEROFF)
                 {
                     sprintf(logbuff,"\nReceived Data Request to Temperature Task! Exiting App!");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    //exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_TEMPREG_CONFIG_READ)
+                {
+                    sprintf(logbuff,"\nReceived Config Register Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_TEMPREG_READ)
+                {
+                    sprintf(logbuff,"\nReceived TEMP Register Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_TEMPREG_DATA_LOW_READ)
+                {
+                    sprintf(logbuff,"\nReceived TEMP T-LOW Register Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_TEMPREG_DATA_HIGH_READ)
+                {
+                    sprintf(logbuff,"\nReceived TEMP T-HIGH Register Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);
@@ -446,7 +650,156 @@ uint8_t monitor_hb_notif()
     req_cnt +=1;
     return 1;
 }
+enum Status api_read_temp_register(uint16_t *readval)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
 
+    request_pck.req_type = REQ_TEMPREG_READ;
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(temp_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    req_processed = 0;
+    return SUCCESS;
+
+
+}
+enum Status api_read_temp_config_register(uint16_t *readval)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_CONFIG_READ;
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(temp_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    req_processed = 0;
+    return SUCCESS;
+
+
+}
+
+enum Status api_read_temp_tlow_register(uint16_t *readval)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_DATA_LOW_READ;
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(temp_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    req_processed = 0;
+    return SUCCESS;
+
+
+}
+
+enum Status api_read_temp_thigh_register(uint16_t *readval)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_DATA_HIGH_READ;
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(temp_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    req_processed = 0;
+    return SUCCESS;
+
+
+}
+
+enum Status api_read_tempreg(request_t reg_request,uint16_t *readval)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    switch(reg_request)
+    {
+        case REQ_TEMPREG_READ:
+            api_read_temp_register(readval);
+            break;
+        case REQ_TEMPREG_CONFIG_READ: 
+            api_read_temp_config_register(readval);
+            break;
+        case REQ_TEMPREG_DATA_LOW_READ: 
+            api_read_temp_tlow_register(readval);
+            break;
+        case REQ_TEMPREG_DATA_HIGH_READ: 
+            api_read_temp_thigh_register(readval);
+            break;                                   
+
+    }
+
+}
 
 int main(int argc, char **argv)
 {
@@ -470,9 +823,7 @@ int main(int argc, char **argv)
   	}
     
     printf("%ld",sizeof(argv[1]));
-    //strncpy(logfname,argv[1],sizeof(argv[1]));
     printf("%s",logfname);
-   // exit(0);
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -492,15 +843,22 @@ int main(int argc, char **argv)
 
     mq_attr_log_queue.mq_maxmsg = 10;
     mq_attr_log_queue.mq_msgsize = sizeof(logpacket);
+    
+    mq_attr_temp_req_queue.mq_maxmsg = 10;
+    mq_attr_temp_req_queue.mq_msgsize = sizeof(logpacket);
 
-
+    mq_unlink(MSG_QUEUE);
     msg_queue = mq_open(MSG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
 
     // To improve efficiency of space. Stop using counter as the size of each message
+    mq_unlink(HB_TEMP_QUEUE);
     hb_temp_queue = mq_open(HB_TEMP_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
+    mq_unlink(HB_LIGHT_QUEUE);
     hb_light_queue = mq_open(HB_LIGHT_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_queue);
+    mq_unlink(HB_LOG_QUEUE);
     hb_log_queue = mq_open(HB_LOG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
-    temp_req_queue = mq_open(HB_TEMP_REQ_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
+    mq_unlink(HB_TEMP_REQ_QUEUE);
+    temp_req_queue = mq_open(HB_TEMP_REQ_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_temp_req_queue);
 
     if(msg_queue == -1)
     {
@@ -537,7 +895,18 @@ int main(int argc, char **argv)
     	printf("\nERR: Failure to init condition\n");
     	
     }
-     
+
+    if(pthread_cond_init(&sig_req_process,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    }
+    
+    if(pthread_mutex_init(&req_process_mutex,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    }     
     if(hb_log_queue == -1)
     {
         printf("\nUnable to open message queue! Exiting\n");
@@ -572,6 +941,7 @@ int main(int argc, char **argv)
         printf("\nMain was unable to send message\n");
     }
     logpacket request_pck;
+    logpacket req_rcv_pckt;
     while(1)
     {
         uint8_t api_count=0;
@@ -579,25 +949,20 @@ int main(int argc, char **argv)
         {
             break;
         }
+        //Testing Querry APIs of Temperature Task
         api_count++;
-        if (api_count == 1)
+        uint16_t readval;
+        if (api_count == 1 && !req_processed)
         {
+            api_count++;
             printf("\n API COUNT %d",api_count);
-            request_pck.req_type = REQ_TEMP;
-            status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
-            if(status == -1)
-            {
-                printf("\nMain was unable to send request message\n");
-            }
-            request_flag_temp =1;
-            api_count = 0;
-
+            api_read_tempreg(REQ_TEMPREG_DATA_HIGH_READ,&readval);
         }
 
     }
     //Synchronization with the main thread
-    //pthread_join(tempsensor_thread, NULL);
- 	//pthread_join(lightsensor_thread, NULL);
+    pthread_join(tempsensor_thread, NULL);
+ 	pthread_join(lightsensor_thread, NULL);
 	pthread_join(synclogger_thread, NULL);
     exit_handler(SIGINT);
 	return 0;
