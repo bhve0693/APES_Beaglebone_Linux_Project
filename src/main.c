@@ -48,6 +48,7 @@ static volatile sig_atomic_t light_flag = 0;
 static volatile sig_atomic_t temp_flag = 0;
 static volatile sig_atomic_t request_flag_temp = 0;
 static volatile sig_atomic_t req_processed = 0;
+static volatile sig_atomic_t write_complete = 0;
 static volatile sig_atomic_t req_cnt = 0;
 
 pthread_cond_t sig_logger;
@@ -131,6 +132,7 @@ enum Status api_temp_req_hdlr()
     char *temp_buff_uint16 = (char*)malloc(sizeof(uint16_t));
     uint16_t temp_value_uint16;
     float temp_value_float;
+    uint16_t temp_write_value;
     status = mq_receive(temp_req_queue,(logpacket*)&msg_request, sizeof(msg_request), NULL);
     if(status >0)
     {
@@ -243,7 +245,7 @@ enum Status api_temp_req_hdlr()
                 req_processed = 1;
             }
             break;
-        case REQ_TEMPREG_DATA_HIGH_READ:
+        case REQ_TEMPREG_DATA_HIGH_READ: 
             printf("\nTEMP CONFIG REQUEST RECVD\n");
             status = read_temp_register(fd_temp,4,&temp_value_uint16);
             sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
@@ -251,7 +253,7 @@ enum Status api_temp_req_hdlr()
             printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
             strcpy(api_req_msg.logmsg,temp_buff_uint16);
             api_req_msg.req_type = REQ_TEMPREG_DATA_HIGH_READ;
-            if(api_req_msg.logmsg != NULL)
+            if(api_req_msg.logmsg != NULL)req_processed = 1;
             {
                 if(api_temp_log(api_req_msg))
                 {
@@ -270,12 +272,94 @@ enum Status api_temp_req_hdlr()
                 req_processed = 1;
             }
             break;
+        case REQ_TEMPREG_PTRREG_WRITE:
+        	printf("\nTEMP PTR WRITE REQUEST RCVD\n");
+        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	status = write_temp_register(fd_temp,0,temp_write_value);
+        	if(status)
+        	{
+        		strcpy(msg_request.logmsg,"INVALID PTR WRITE VALUE");
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+                pthread_cond_signal(&sig_req_process);
+        	//IF WRITE IS SUCCESSFUL
+        	if(!status)
+        	write_complete = 1;
+        	req_processed = 1;
+        	break;
+        case REQ_TEMPREG_CONFIG_WRITE:
+        	printf("\nTEMP CONFIG WRITE REQUEST RCVD\n");
+        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	status = write_temp_register(fd_temp,2,temp_write_value);
+        	if(status)
+        	{
+        		strcpy(msg_request.logmsg,"INVALID CONFIG WRITE VALUE");
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+                pthread_cond_signal(&sig_req_process);
+        	//IF WRITE IS SUCCESSFUL
+        	if(!status)
+        	write_complete = 1;
+        	req_processed = 1;
+        	break;
 
+        case REQ_TEMPREG_DATA_LOW_WRITE:
+        	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
+        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	status = write_temp_register(fd_temp,3,temp_write_value);
+        	if(status)
+        	{
+        		strcpy(msg_request.logmsg,"INVALID TLOW WRITE VALUE");
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+                pthread_cond_signal(&sig_req_process);
+        	//IF WRITE IS SUCCESSFUL
+        	if(!status)
+        	write_complete = 1;
+        	req_processed = 1;
+        	break;
+        case REQ_TEMPREG_DATA_HIGH_WRITE:
+        	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
+        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	status = write_temp_register(fd_temp,4,temp_write_value);
+        	if(status)
+        	{
+        		strcpy(msg_request.logmsg,"INVALID THIGH WRITE VALUE");
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+                pthread_cond_signal(&sig_req_process);
+        	//IF WRITE IS SUCCESSFUL
+        	if(!status)
+        	write_complete = 1;
+        	req_processed = 1;
+        	break;        	
     }
                     
 
     return SUCCESS;
 }
+
+
 enum Status init_tempsensor_task()
 {
     uint8_t status;
@@ -532,6 +616,38 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);
                 }
+                if(temp.req_type == REQ_TEMPREG_PTRREG_WRITE)
+                {
+                	sprintf(logbuff,"\nReceived WRITE Request to Temp Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+
+                }
+                if(temp.req_type == REQ_TEMPREG_CONFIG_WRITE)
+                {
+                	sprintf(logbuff,"\nReceived CONFIG WRITE Request to Temp Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+
+                }
+                if(temp.req_type == REQ_TEMPREG_DATA_LOW_WRITE)
+                {
+                	sprintf(logbuff,"\nReceived TLOW WRITE Request to Temp Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+
+                }
+                if(temp.req_type == REQ_TEMPREG_DATA_HIGH_WRITE)
+                {
+                	sprintf(logbuff,"\nReceived THIGH WRITE Request to Temp Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }                                
+
                 strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
@@ -672,6 +788,7 @@ enum Status api_read_temp_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
@@ -703,6 +820,7 @@ enum Status api_read_temp_config_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
@@ -735,6 +853,7 @@ enum Status api_read_temp_tlow_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
@@ -767,6 +886,7 @@ enum Status api_read_temp_thigh_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
@@ -778,26 +898,174 @@ enum Status api_read_temp_thigh_register(uint16_t *readval)
 
 }
 
+enum Status api_write_temp_ptr_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_PTRREG_WRITE;
+    char *temp_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(temp_buff,"%d",writeval);
+    strcpy(request_pck.logmsg,temp_buff);
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    if(write_complete)
+    {
+    	write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+
+}
+enum Status api_write_temp_config_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_CONFIG_WRITE;
+    char *temp_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(temp_buff,"%d",writeval);
+    strcpy(request_pck.logmsg,temp_buff);
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    if(write_complete)
+    {
+    	write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+
+}
+
+enum Status api_write_temp_tlow_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_DATA_LOW_WRITE;
+    char *temp_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(temp_buff,"%d",writeval);
+    strcpy(request_pck.logmsg,temp_buff);
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    if(write_complete)
+    {
+    	write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+
+	
+}
+
+enum Status api_write_temp_thigh_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t status;
+    request_pck.req_type = REQ_TEMPREG_DATA_HIGH_WRITE;
+    char *temp_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(temp_buff,"%d",writeval);
+    strcpy(request_pck.logmsg,temp_buff);
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    if(write_complete)
+    {
+    	write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+	
+}
+
+
+
+enum Status api_write_tempreg(request_t reg_request,uint16_t writeval)
+{
+	enum Status state;
+	switch(reg_request)
+	{
+        case REQ_TEMPREG_PTRREG_WRITE:
+            state = api_write_temp_ptr_register(writeval);
+            break;
+        case REQ_TEMPREG_CONFIG_WRITE: 
+            state = api_write_temp_config_register(writeval);
+            break;
+        case REQ_TEMPREG_DATA_LOW_WRITE: 
+            state = api_write_temp_tlow_register(writeval);
+            break;
+        case REQ_TEMPREG_DATA_HIGH_WRITE: 
+            state = api_write_temp_thigh_register(writeval);
+            break;
+        default:
+        	state = FAIL;
+        	break;      		
+	}
+	return state;
+
+}
 enum Status api_read_tempreg(request_t reg_request,uint16_t *readval)
 {
-    logpacket request_pck;
-    logpacket req_rcv_pckt;
+	enum Status state;
     switch(reg_request)
     {
         case REQ_TEMPREG_READ:
-            api_read_temp_register(readval);
+            state = api_read_temp_register(readval);
             break;
         case REQ_TEMPREG_CONFIG_READ: 
-            api_read_temp_config_register(readval);
+            state = api_read_temp_config_register(readval);
             break;
         case REQ_TEMPREG_DATA_LOW_READ: 
-            api_read_temp_tlow_register(readval);
+            state = api_read_temp_tlow_register(readval);
             break;
         case REQ_TEMPREG_DATA_HIGH_READ: 
-            api_read_temp_thigh_register(readval);
-            break;                                   
-
+            state = api_read_temp_thigh_register(readval);
+            break;
+        default:
+        	state = FAIL;
+        	break;                                   
     }
+    return state;
 
 }
 
@@ -952,11 +1220,17 @@ int main(int argc, char **argv)
         //Testing Querry APIs of Temperature Task
         api_count++;
         uint16_t readval;
+        uint16_t writeval = 0x7000;
         if (api_count == 1 && !req_processed)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-            api_read_tempreg(REQ_TEMPREG_DATA_HIGH_READ,&readval);
+            api_write_tempreg(REQ_TEMPREG_PTRREG_WRITE,writeval);
+           // api_read_tempreg(REQ_TEMPREG_DATA_HIGH_READ,&readval);
+            //api_write_tempreg(REQ_TEMPREG_PTRREG_WRITE,writeval);
+            //api_write_tempreg(REQ_TEMPREG_CONFIG_WRITE,writeval);
+            //api_write_tempreg(REQ_TEMPREG_DATA_LOW_WRITE,writeval);
+            //api_write_tempreg(REQ_TEMPREG_DATA_HIGH_WRITE,writeval);
         }
 
     }
