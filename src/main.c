@@ -50,6 +50,9 @@ static volatile sig_atomic_t request_flag_temp = 0;
 static volatile sig_atomic_t req_processed = 0;
 static volatile sig_atomic_t write_complete = 0;
 static volatile sig_atomic_t req_cnt = 0;
+static volatile sig_atomic_t shutdown_disable_complete = 0;
+static volatile sig_atomic_t shutdown_enable_complete = 0;
+static volatile sig_atomic_t conv_rate_set = 0;
 
 pthread_cond_t sig_logger;
 pthread_mutex_t logger_mutex;
@@ -409,12 +412,110 @@ enum Status api_temp_req_hdlr()
                 //ERR_Log();
                 return FAIL;
             }
-                pthread_cond_signal(&sig_req_process);
+            pthread_cond_signal(&sig_req_process);
         	//IF WRITE IS SUCCESSFUL
         	if(!status)
         	write_complete = 1;
         	req_processed = 1;
+        	break;  
+        case REQ_SHUTDOWN_ENABLE:
+        	printf("\nTEMP Sensor Shutdown Enable REQUEST RCVD\n");
+        	status= shutdown_temp_mode(fd_temp,1);
+        	if(!status)
+        	{
+        		shutdown_enable_complete = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
+        	break;
+        	
+        case REQ_SHUTDOWN_DISABLE:
+        	printf("\nTEMP Sensor Shutdown Disable REQUEST RCVD\n");
+        	status= shutdown_temp_mode(fd_temp,0);
+        	if(!status)
+        	{
+        		shutdown_disable_complete = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
+        	break;
+        case REQ_TEMP_CONV_RATE_0_25_HZ:
+        	printf("\nTEMP Sensor Conversion Rate Set as 0.25HZ REQUEST RCVD\n");
+        	status = continuous_conversion_mode(fd_temp,0);
+        	if(!status)
+        	{
+        		conv_rate_set = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
+        	break;
+        case REQ_TEMP_CONV_RATE_1_HZ:
+        	printf("\nTEMP Sensor Conversion Rate Set as 1HZ REQUEST RCVD\n");
+        	status = continuous_conversion_mode(fd_temp,1);
+        	if(!status)
+        	{
+        		conv_rate_set = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
+        	break;        
+        case REQ_TEMP_CONV_RATE_4_HZ:
+        	printf("\nTEMP Sensor Conversion Rate Set as 4HZ REQUEST RCVD\n");
+        	status = continuous_conversion_mode(fd_temp,2);
+        	if(!status)
+        	{
+        		conv_rate_set = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
+        	break;
+        case REQ_TEMP_CONV_RATE_8_HZ:
+        	printf("\nTEMP Sensor Conversion Rate Set as 8HZ REQUEST RCVD\n");
+        	status = continuous_conversion_mode(fd_temp,3);
+        	if(!status)
+        	{
+        		conv_rate_set = 1;
+        	}
+        	if(api_temp_log(msg_request))
+            {
+                printf("\ntemp was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+            pthread_cond_signal(&sig_req_process);
+        	req_processed = 1;
         	break;        	
+
     }
                     
 
@@ -731,8 +832,49 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_SHUTDOWN_ENABLE)
+                {
+                	sprintf(logbuff,"\nReceived SHUTDOWN Enable Request to Temp Task");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
                 }                                
-
+                if(temp.req_type == REQ_SHUTDOWN_DISABLE)
+                {
+                	sprintf(logbuff,"\nReceived SHUTDOWN Disable Request to Temp Task");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+				if(temp.req_type == REQ_TEMP_CONV_RATE_0_25_HZ)
+                {
+                	sprintf(logbuff,"\nReceived CONV RATE SET Req as 0.25hz");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                } 
+                if(temp.req_type == REQ_TEMP_CONV_RATE_1_HZ)
+                {
+                	sprintf(logbuff,"\nReceived CONV RATE SET Req as 1hz");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }               
+                if(temp.req_type == REQ_TEMP_CONV_RATE_4_HZ)
+                {
+                	sprintf(logbuff,"\nReceived CONV RATE SET Req as 4hz");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+                if(temp.req_type == REQ_TEMP_CONV_RATE_8_HZ)
+                {
+                	sprintf(logbuff,"\nReceived CONV RATE SET Req as 8hz");
+                   // strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }                  
                 strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
@@ -1117,7 +1259,6 @@ enum Status api_write_temp_tlow_register(uint16_t writeval)
 enum Status api_write_temp_thigh_register(uint16_t writeval)
 {
 	logpacket request_pck;
-    logpacket req_rcv_pckt;
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_DATA_HIGH_WRITE;
     char *temp_buff = (char*)malloc(sizeof(uint16_t));
@@ -1193,6 +1334,81 @@ enum Status api_read_tempreg(request_t reg_request,uint16_t *readval)
     }
     return state;
 
+}
+enum Status api_temp_setconv(request_t conv_rate)
+{
+	logpacket request_pck;
+	uint8_t status;
+	request_pck.req_type = conv_rate;
+	status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+	if(status == -1)
+	{
+        printf("\nMain was unable to send request message\n");
+    }
+    while(!req_processed);
+    if(conv_rate_set)
+    {
+    	conv_rate_set = 0;
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+
+}
+enum Status api_temp_rqt_shutdown(uint8_t option)
+{
+	if(option == 1)
+	{
+		logpacket request_pck;
+	    uint8_t status;
+	   // api_write_tempreg(REQ_TEMPREG_CONFIG_WRITE,0x61a0);
+	    request_pck.req_type = REQ_SHUTDOWN_ENABLE;
+	    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+	    printf("\nStatus Value of temp req queue %d\n",status);
+	    printf("\n Sending Request Type %d\n",request_pck.req_type);
+	    if(status == -1)
+	    {
+	        printf("\nMain was unable to send request message\n");
+	    }
+	    request_flag_temp =1;
+	    while(!req_processed);
+	    if(shutdown_enable_complete)
+	    {
+	    	shutdown_enable_complete = 0; 
+	    	return SUCCESS;
+	    }
+	    else
+	    {
+	    	return FAIL;
+	    }
+
+	}
+	else if(option == 0){
+		logpacket request_pck;
+	    uint8_t status;
+	    request_pck.req_type = REQ_SHUTDOWN_DISABLE;
+	    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+	    printf("\nStatus Value of temp req queue %d\n",status);
+	    printf("\n Sending Request Type %d\n",request_pck.req_type);
+	    if(status == -1)
+	    {
+	        printf("\nMain was unable to send request message\n");
+	    }
+	    request_flag_temp =1;
+	    while(!req_processed);
+	    if(shutdown_disable_complete)
+	    {
+	    	shutdown_disable_complete = 0; 
+	    	return SUCCESS;
+	    }
+	    else
+	    {
+	    	return FAIL;
+	    }
+
+	}
 }
 
 int main(int argc, char **argv)
@@ -1346,13 +1562,12 @@ int main(int argc, char **argv)
         //Testing Querry APIs of Temperature Task
         api_count++;
         uint16_t readval;
-        uint16_t writeval = 0x7000;
+        uint16_t writeval = 0x68a0;
         if (api_count == 1 && !req_processed)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-            api_read_temp_value(&readval,REQ_TEMP_CELSIUS);
-            printf("\nTemperature Response is %f K\n",readval);
+        	api_temp_rqt_shutdown(0);
         }
 
     }

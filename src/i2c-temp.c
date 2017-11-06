@@ -170,7 +170,7 @@ enum Status continuous_conversion_mode(uint8_t fd,uint8_t option)
 {
 	uint16_t config_val;
 
-	stat = read_temp_register(fd,2,&config_val);
+	stat = read_temp_register(fd,REQ_TEMPREG_CONFIG_READ,&config_val);
 	if(!option)
 	{
 		config_val &= ~ENABLE_4;
@@ -200,12 +200,14 @@ enum Status continuous_conversion_mode(uint8_t fd,uint8_t option)
 	{
 		printf("\nInvalid option....setting rate to 4Hz default:%4x\n",config_val);
 	}
+	stat = write_temp_register(fd, REQ_TEMPREG_CONFIG_WRITE, config_val);
+	return stat;	
 }
 
 enum Status shutdown_temp_mode(uint8_t fd,uint8_t option)
 {
 	uint16_t config_val;
-	stat = read_temp_register(fd,2,&config_val);
+	stat = read_temp_register(fd,REQ_TEMPREG_CONFIG_READ,&config_val);
 	if(option==1)
 	{
 		config_val |= SHUTDOWN_ENABLE;
@@ -217,6 +219,8 @@ enum Status shutdown_temp_mode(uint8_t fd,uint8_t option)
 		config_val &= ~SHUTDOWN_ENABLE;
 		printf("\nShutdown disabled:%4x\n",config_val);
 	}
+	stat = write_temp_register(fd, REQ_TEMPREG_CONFIG_WRITE, config_val);
+	return stat;
 }
 
 
