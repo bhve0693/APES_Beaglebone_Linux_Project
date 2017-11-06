@@ -23,7 +23,7 @@
 #include "message.h"
 #include "fw_i2c.h"
 #include "i2c_temp.h"
-
+#include "i2c_light.h"
 #define MSG_QUEUE "/msg_queue"
 #define HB_TEMP_QUEUE "/hb_temp_queue"
 #define HB_LIGHT_QUEUE "/hb_light_queue"
@@ -44,6 +44,8 @@ struct mq_attr mq_attr_queue;
 struct mq_attr mq_attr_hb_queue;
 struct mq_attr mq_attr_log_queue;
 struct mq_attr mq_attr_temp_req_queue;
+
+static volatile sig_atomic_t blocking = 1;
 static volatile sig_atomic_t light_flag = 0;
 static volatile sig_atomic_t temp_flag = 0;
 static volatile sig_atomic_t request_flag_temp = 0;
@@ -56,13 +58,20 @@ static volatile sig_atomic_t conv_rate_set = 0;
 
 pthread_cond_t sig_logger;
 pthread_mutex_t logger_mutex;
+pthread_cond_t proceed_init;
+pthread_mutex_t proceed_init_mutex;
 pthread_mutex_t msg_temp_mutex;
 pthread_mutex_t msg_light_mutex;
 pthread_cond_t sig_req_process;
 pthread_mutex_t req_process_mutex;
 
+pthread_mutex_t i2c_init_mutex;
+pthread_mutex_t i2c_rw_mutex;
+//pthread_mutex_t msg_light_mutex;
+
 
 uint8_t fd_temp;
+uint8_t fd_light;
 uint8_t hb_temp_cnt;
 uint8_t hb_light_cnt;
 uint8_t hb_synclog_cnt;
@@ -74,6 +83,8 @@ static mqd_t hb_log_queue;
 static mqd_t temp_req_queue;
 
 FILE *fp;
+char *i2c_temp_fname = "/dev/i2c-2";
+char *i2c_light_fname = "/dev/i2c-2";
 //static unsigned int counter;
 static volatile sig_atomic_t counter =0;
 logpacket msg_tempsensor,msg_lightsensor, msg_synclogger;
@@ -527,14 +538,22 @@ enum Status init_tempsensor_task()
 {
     uint8_t status;
     logpacket msg;
-    fd_temp = open("/dev/i2c-2",O_RDWR);
+    fd_temp = open(i2c_temp_fname,O_RDWR);
     if(fd_temp<0)
     {
         printf("\nFailed to Open\n ");
         return FAIL;
         //ERR_Log();
     }
+    /*if(pthread_mutex_lock(&i2c_init_mutex) !=0)
+    {
+        printf("\nERR: Unable to Lock\n");
+    }*/
     status = i2c_temp_init(fd_temp,0x48);
+    /*if(pthread_mutex_unlock(&i2c_init_mutex))
+    {
+        printf("\nERR: Unable to unlock\n");
+    }*/
     if(status)
     {
         printf("\nERR:Failed to Init I2C\n ");
@@ -543,10 +562,10 @@ enum Status init_tempsensor_task()
     }
     msg.sourceid = SRC_TEMPERATURE;
     msg.level = LOG_INIT;
-    char *init_msg = "TEMP :Initialization Done";
+    char *init_msg = "\nTEMP :Initialization Done";
     strcpy(msg.logmsg,init_msg);
     api_temp_log(msg);
-
+    pthread_cond_signal(&proceed_init);
     return SUCCESS;
 }
 
@@ -556,7 +575,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     uint8_t status;
     uint8_t temp_count;
     logpacket msg_request;
-    usecs = 1000000;
+    usecs = 10000;
     printf("\nIn Temperature Sensor Thread execution\n");
     //Creating Log message in logpacket
     status = init_tempsensor_task();
@@ -567,7 +586,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
         //Log Error in Log Queue
     }
     
-    float temp_value;
+    float temp_value = 0;
     //float temp_value = 35.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
@@ -583,7 +602,16 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             exit_handler(SIGINT);
             //ERR_Log();
         }
-        temp_value = temp_read(fd_temp,0);
+        /*if(pthread_mutex_lock(&i2c_rw_mutex) !=0)
+        {
+            printf("\nERR: Unable to Lock\n");
+        }*/
+        temp_value = temp_read(fd_light,REQ_TEMP_CELSIUS);
+        //temp_value++;
+        if(pthread_mutex_unlock(&i2c_rw_mutex) !=0)
+        {
+            printf("\nERR: Unable to unlock\n");
+        }
         sprintf(temp_buff,"%f",temp_value);
         gettimeofday(&msg_tempsensor.time_stamp, NULL);
         strcpy(msg_tempsensor.logmsg,temp_buff);
@@ -617,6 +645,10 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             {
                 printf("\nReceive Heartbeat temp request: %d\n", temp_count);
                 hb_temp_cnt+=1;
+                if(hb_temp_cnt %200 == 0)
+                {
+                    hb_temp_cnt = 0;   
+                }
                 status=mq_send(hb_temp_queue, (const char*)&hb_temp_cnt, sizeof(counter),1);
 
             }
@@ -630,6 +662,47 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
 	//Log data into log queues 
 
 }
+ 
+enum Status init_lightsensor_task()
+{
+    uint8_t status;
+    logpacket msg;
+    //pthread_mutex_lock()
+    pthread_cond_wait(&proceed_init,&proceed_init_mutex);
+    printf("\nInit Light Task\n");
+    //if(!fd_temp)
+    //{
+        fd_light= open(i2c_light_fname,O_RDWR);
+    //}
+    if(fd_light<0)
+    {
+        printf("\nFailed to Open\n ");
+        return FAIL;
+        //ERR_Log();
+    }
+   /* if(pthread_mutex_lock(&i2c_init_mutex) !=0)
+    {
+        printf("\nERR: Unable to Lock\n");
+    }*/
+    status = i2c_light_init(fd_light,DEV_LIGHT_ADDR);
+    /*if(pthread_mutex_unlock(&i2c_init_mutex) !=0)
+    {
+        printf("\nERR: Unable to Lock\n");
+    }*/
+    if(status)
+    {
+        printf("\nERR:Failed to Init I2C\n ");
+        return FAIL;
+        //ERR_Log();   
+    }
+    msg.sourceid = SRC_LIGHT;
+    msg.level = LOG_INIT;
+    char *init_msg = "\nLIGHT :Initialization Done";
+    strcpy(msg.logmsg,init_msg);
+    api_temp_log(msg);
+
+    return SUCCESS;
+}
 
 void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
 {
@@ -637,40 +710,55 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
     int status;
     int recvcounter;
     uint8_t temp_count;
-    usecs = 10000000;
+    usecs = 45000;
     printf("\nIn Light Sensor Thread execution\n");
     printf("\nRecvcounter is %d\n",recvcounter);
-    /*float temp_value = 38.02;
+    init_lightsensor_task();
+    double temp_value;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
     {
         printf("\nERR:Malloc Error");
     }
-    sprintf(temp_buff,"%f",temp_value);
-    //msg_tempsensor.msg_size = strlen(temp_buff);
-    gettimeofday(&msg_lightsensor.time_stamp, NULL);
-    msg_lightsensor.logmsg = NULL;
-    msg_lightsensor.logmsg = (uint8_t*)temp_buff;
-    msg_lightsensor.sourceid = SRC_LIGHT;
-    if(msg_lightsensor.logmsg != NULL)
-    {
-        status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
-        if(status == -1)
-        {
-            printf("\ntemp was unable to send log message\n");
-        }
-       // pthread_cond_signal(&sig_logger);
-    }*/
+
 
     while(1)
     {
         
-        status = mq_receive(msg_queue,(char*)&recvcounter, sizeof(recvcounter), NULL);
+       /* status = mq_receive(msg_queue,(char*)&recvcounter, sizeof(recvcounter), NULL);
         if(status >0)
         {
             printf("\nRecevied Message in Lightsensor Thread : %d\n",recvcounter);
             counter+=1;
+            if(counter % 200 == 0)
+            {
+                counter = 0;
+            }
+        }*/
+        /*if(pthread_mutex_lock(&i2c_rw_mutex) !=0)
+        {
+            printf("\nERR: Unable to Lock\n");
+        }*/
+        temp_value = light_read(fd_temp);
+        /*if(pthread_mutex_unlock(&i2c_rw_mutex) !=0)
+        {
+            printf("\nERR: Unable to unlock\n");
+        }*/
+        sprintf(temp_buff,"%lf",temp_value);
+        //msg_tempsensor.msg_size = strlen(temp_buff);
+        gettimeofday(&msg_lightsensor.time_stamp, NULL);
+        strcpy(msg_lightsensor.logmsg, temp_buff);
+        msg_lightsensor.sourceid = SRC_LIGHT;
+        if(msg_lightsensor.logmsg != NULL)
+        {
+            status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+            if(status == -1)
+            {
+                printf("\ntemp was unable to send log message\n");
+            }
+            //pthread_cond_signal(&sig_logger);
         }
+        //temp_value++;
         usleep(usecs);
         if(light_flag)
         {
@@ -679,6 +767,10 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
             {
                 printf("\nReceive Heartbeat request: %d\n", temp_count);
                 hb_light_cnt+=1;
+                if(hb_light_cnt %200 == 0)
+                {
+                    hb_light_cnt = 0;
+                }
                 status=mq_send(hb_light_queue, (const char*)&hb_light_cnt, sizeof(counter),1);
 
             }
@@ -709,7 +801,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 		pthread_exit(NULL);
 	} 
     uint32_t usecs;
-    usecs = 2000000;
+    usecs = 20000;
 	//Wait on temperature Thread to log
     while(1)
     {
@@ -729,7 +821,16 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                // printf("\n%d\n",strlen((char*)temp.logmsg));
                 if(temp.sourceid == SRC_LIGHT)
                 {
-                    sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                    if(temp.level == LOG_INIT)
+                    {
+                        strcpy(logbuff,temp.logmsg);
+                    }
+                    else
+                    {
+                        sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                        strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    }
+                    
                    // sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
                 }
                 else if(temp.sourceid == SRC_TEMPERATURE)
@@ -741,7 +842,9 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     else
                     {
                         sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
+                        strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     }    
+
                     //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
                 }
                 if(temp.req_type == REQ_POWEROFF)
@@ -875,7 +978,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);
                 }                  
-                strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                //strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
             }    
@@ -1512,7 +1615,33 @@ int main(int argc, char **argv)
         
     }
     
+
+    if(pthread_mutex_init(&proceed_init_mutex,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    }
+
+    if(pthread_cond_init(&proceed_init,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    }
+
+
     if(pthread_mutex_init(&req_process_mutex,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    } 
+
+    if(pthread_mutex_init(&i2c_init_mutex,NULL))
+    {
+        printf("\nERR: Failure to init condition\n");
+        
+    } 
+
+    if(pthread_mutex_init(&i2c_rw_mutex,NULL))
     {
         printf("\nERR: Failure to init condition\n");
         
@@ -1567,7 +1696,7 @@ int main(int argc, char **argv)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-        	api_temp_rqt_shutdown(0);
+        	//api_temp_rqt_shutdown(0);
         }
 
     }

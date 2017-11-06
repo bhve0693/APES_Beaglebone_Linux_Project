@@ -1,3 +1,12 @@
+/*
+* FileName        : i2c-light.c
+* Description     :	A software that includes several APIs to access and modify light sensor registers-such as
+					read_light_registers(),write_light_register() and functions to do some special configurations
+* File Author Name:	Divya Sampath Kumar, Bhallaji Venkatesan
+* Tools used	  :	gcc,gdb
+* Reference       : Datasheet
+*/
+
 #include <stdlib.h>
 #include <fcntl.h>
 #include <linux/i2c.h>
@@ -517,12 +526,12 @@ double light_read(uint8_t fd)
 	uint8_t readval;
 	uint16_t final_lumen0,final_lumen1,tl_val,th_val,tmid_val;
 	enum Status stat;
-	stat = i2c_light_init(fd,DEV_LIGHT_ADDR);
+	/*stat = i2c_light_init(fd,DEV_LIGHT_ADDR);
 	if(stat)
 	{
 		printf("\nFailed ioctl() operation:%s\n",strerror(errno));
 		exit(1);
-	}
+	}*/
 	stat = light_sensor_switchon(fd);
 	if(stat)
 	{

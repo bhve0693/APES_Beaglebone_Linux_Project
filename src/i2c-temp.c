@@ -1,3 +1,12 @@
+/*
+* FileName        : i2c-temp.c
+* Description     :	A software that includes several APIs to access and modify light sensor registers-such as
+					read_temp_register(),write_temp_register() and functions to do some special configurations
+* File Author Name:	Divya Sampath Kumar, Bhallaji Venkatesan
+* Tools used	  :	gcc,gdb
+* Reference       : https://www.kernel.org/doc/Documentation/i2c/dev-interface
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
