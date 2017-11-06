@@ -33,13 +33,24 @@
 enum Status {SUCCESS,FAIL} stat;
 
 /**
-​ * ​ ​ @brief​ : To initialize I2C Application driver
+​ * ​ ​ @brief​ : To initialize I2C Application driver for temperature sensor
 ​ *
 ​ * ​ ​ Returns status indicating init success or fail
 ​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
  *	 @param : addr -I2C Slave Address ​ 
 ​ */
 enum Status i2c_temp_init(uint8_t fd,uint8_t addr);
+
+
+/**
+​ * ​ ​ @brief​ : To initialize I2C Application driver forl ight sensor
+​ *
+​ * ​ ​ Returns status indicating init success or fail
+​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
+ *	 @param : addr -I2C Slave Address ​ 
+ */
+enum Status i2c_light_init(uint8_t fd,uint8_t addr);
+
 
 /**
 ​ * ​ ​ @brief​ : Function to write to an I2C Device File
@@ -49,6 +60,7 @@ enum Status i2c_temp_init(uint8_t fd,uint8_t addr);
  *	 @param : val - value to be written to file
  *    
 ​ */
+
 enum Status i2c_write(uint8_t fd,uint8_t *val);
 
 /**
@@ -73,7 +85,7 @@ enum Status i2c_write_word(uint8_t fd,uint8_t *val);
 enum Status i2c_read(uint8_t fd,uint8_t *val);
 
 /**
-​ * ​ ​ @brief​ : Function to read from an I2C Device File
+​ * ​ ​ @brief​ : Function to read word sized data from an I2C Device File
 ​ *
 ​ * ​ ​ Returns a status of type Status to indicate read Fail or Success
 ​ * ​  ​@param : fd  - accepts I2C Device file descriptor
@@ -82,5 +94,6 @@ enum Status i2c_read(uint8_t fd,uint8_t *val);
 
 enum Status i2c_read_word(uint8_t fd,uint8_t *val);
 
+enum Status i2c_write_light(uint8_t fd,uint8_t *val);
 
 #endif

@@ -12,21 +12,352 @@
 #include "i2c_light.h"
 
 
-#define CMD_REG 0x80
-#define CNTRL_REG 0x00
-#define ADC0_REG_LOW 0x0C
-#define ADC0_REG_HIGH 0x0D
-#define ADC1_REG_LOW 0x0E
-#define ADC1_REG_HIGH 0x0F
-#define DEV_ADDR 0x39
+char *light_indication;
+enum Status read_id_reg(uint8_t fd,uint8_t reg,uint8_t *val)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read(fd,val);
+	}
+	return stat;
+}
+
+enum Status read_timing_reg(uint8_t fd,uint8_t reg,uint8_t *val)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read(fd,val);
+	}
+	return stat;
+}
+
+enum Status read_intr_reg(uint8_t fd,uint8_t reg,uint8_t *val)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read(fd,val);
+	}
+	return stat;
+}
+
+enum Status read_cntl_reg(uint8_t fd,uint8_t reg,uint8_t *val)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read(fd,val);
+	}
+	return stat;
+}
+
+
+enum Status read_adc_reg(uint8_t fd,uint8_t reg,uint8_t *val)
+{
+	enum Status stat;
+	stat = i2c_write(fd,&reg);
+	if(!stat)
+	{
+		stat = i2c_read(fd,val);
+	}
+	return stat;
+}
+
+enum Status read_threshlow_reg(uint8_t fd,uint8_t reg, uint16_t *val)
+{
+	enum Status stat;
+
+	stat = i2c_write(fd,&reg);
+	uint8_t *buffer = (uint8_t*)malloc(2*sizeof(uint8_t));
+	if(!stat)
+	{
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
+	}
+	return stat;	
+}
+
+enum Status read_threshhigh_reg(uint8_t fd,uint8_t reg, uint16_t *val)
+{
+	enum Status stat;
+
+	stat = i2c_write(fd,&reg);
+	uint8_t *buffer = (uint8_t*)malloc(2*sizeof(uint8_t));
+	if(!stat)
+	{
+		stat = i2c_read_word(fd,buffer);
+		*val = (uint16_t)(buffer[0]<<8) | (uint16_t)(buffer[1]);
+	}
+	return stat;	
+}
+
+
+enum Status write_contrl_reg(uint8_t fd,uint8_t reg,uint8_t val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)(malloc(sizeof(uint8_t)*2));
+	buffer[0] = reg;
+	buffer[1] = val;
+	stat = i2c_write_light(fd,buffer);
+	return stat;
+}
+
+enum Status write_intr_reg(uint8_t fd,uint8_t reg,uint8_t val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)(malloc(sizeof(uint8_t)*2));
+	buffer[0] = reg;
+	buffer[1] = val;
+	stat = i2c_write_light(fd,buffer);
+	return stat;
+}
+
+enum Status write_timing_reg(uint8_t fd,uint8_t reg,uint8_t val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)(malloc(sizeof(uint8_t)*2));
+	buffer[0] = reg;
+	buffer[1] = val;
+	stat = i2c_write_light(fd,buffer);
+	return stat;
+}
+
+enum Status write_threshlow_reg(uint8_t fd,uint8_t reg,uint16_t val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)(malloc(sizeof(uint8_t)*2));
+	buffer[0] = reg;
+	buffer[1] = (uint8_t)((val & 0xFF00)>>8);
+	stat = i2c_write_light(fd,buffer);
+	buffer[0] = reg+1;
+	buffer[1] = (uint8_t)(val & 0x00FF);
+	stat = i2c_write_light(fd,buffer);
+	return stat;
+}
+
+enum Status write_threshhigh_reg(uint8_t fd,uint8_t reg,uint16_t val)
+{
+	enum Status stat;
+	uint8_t *buffer = (uint8_t*)(malloc(sizeof(uint8_t)*2));
+	buffer[0] = reg;
+	buffer[1] = (uint8_t)((val & 0xFF00)>>8);
+	stat = i2c_write_light(fd,buffer);
+	buffer[0] = reg+1;
+	buffer[1] = (uint8_t)(val & 0x00FF);
+	stat = i2c_write_light(fd,buffer);
+	return stat;
+}
+
+enum Status read_light_registers(uint8_t fd,uint8_t reg_option,uint16_t *val)
+{
+	enum Status stat;
+	uint8_t high_byte,low_byte,addr,value;
+	switch(reg_option)
+	{
+		case ID: 
+			value = (uint8_t)(*val);
+			stat = read_id_reg(fd,CMD_REG|ID_REG,&value);
+			*val = (uint16_t)value;
+			break;
+
+		case TIMING: 
+			value = (uint8_t)(*val);
+			stat = read_timing_reg(fd,CMD_REG|TIMING_REG,&value);
+			*val = (uint16_t)value;
+			break;
+
+		case INTR: 
+			value = (uint8_t)(*val);
+			stat = read_intr_reg(fd,CMD_REG|INTR_REG,&value);
+			*val = (uint16_t)value;
+			break;
+
+		case CNTRL:
+			value = (uint8_t)(*val);
+			stat = read_cntl_reg(fd, CMD_REG|CNTRL_REG,&value);
+			*val = (uint16_t)value;
+			break;
+
+		case T_LOW:
+			stat = read_threshlow_reg(fd, CMD_REG|THRESH_LOW_REG,val);
+			break;
+
+		case T_HIGH:
+			stat = read_threshhigh_reg(fd, CMD_REG|THRESH_HIGH_REG,val);
+			break;
+
+
+		case ADC0: 
+			high_byte = (uint8_t)(*val);
+			stat = read_adc_reg(fd,CMD_REG|ADC0_REG_LOW,&high_byte);
+			low_byte = (uint8_t)(*val);
+			stat = read_adc_reg(fd,CMD_REG|ADC0_REG_LOW,&low_byte);
+			*val = ((uint16_t)(high_byte)<<8) | ((uint16_t)(low_byte));
+			break;
+
+		case ADC1: 
+			high_byte = (uint8_t)(*val);
+			stat = read_adc_reg(fd,CMD_REG|ADC1_REG_LOW,&high_byte);
+			low_byte = (uint8_t)(*val);
+			stat = read_adc_reg(fd,CMD_REG|ADC1_REG_HIGH,&low_byte);
+			*val = ((uint16_t)(high_byte)<<8) | ((uint16_t)(low_byte));
+			break;
+			
+
+
+		default:stat = FAIL;
+				printf("\nERR:Incorrect register chosen to read\n");	
+	}
+
+	return stat;
+}
+
+
+enum Status write_light_registers(uint8_t fd,uint8_t reg_option,uint16_t val)
+{
+	enum Status stat;
+	uint8_t value;
+	switch(reg_option)
+	{
+		case CNTRL:
+			if(val == 0x01 || val ==0x02)
+			{
+				printf("ERR:Invalid value\n");
+				stat = FAIL;
+			}
+			else 
+			{
+				value = (uint8_t) val;
+				stat = write_contrl_reg(fd,CMD_REG|CNTRL_REG,value);
+			}
+			break;
+
+		case TIMING:
+			if(val > 0x31 || (val | 0x0004))
+			{
+				printf("ERR:Invalid value\n");
+				stat = FAIL;
+			}
+			else
+			{
+				value = (uint8_t) val;
+				stat = write_timing_reg(fd,CMD_REG|TIMING_REG,value);
+			}
+			break;
+
+		case INTR:
+			if(val > 0x63)
+			{
+				printf("ERR:Invalid value\n");
+				stat = FAIL;
+			}
+			else
+			{
+				value = (uint8_t) val;
+				stat = write_intr_reg(fd,CMD_REG|INTR_REG,value);
+			}
+			break;
+
+		case T_LOW:
+			stat = write_threshlow_reg(fd,CMD_REG|THRESH_LOW_REG,val);
+			break;
+
+		case T_HIGH:
+			stat = write_threshhigh_reg(fd,CMD_REG|THRESH_HIGH_REG,val);
+			break;
+		
+		default:stat = FAIL;
+				printf("\nERR:Incorrect register chosen to write\n");	
+	}
+	return stat;
+}
+
+
+
+enum Status config_integration_timing(uint8_t fd,uint8_t integration_option)
+{
+	uint16_t timing_reg_val;
+	uint8_t t8_val;
+	enum Status stat;
+	stat = read_light_registers(fd,TIMING,&timing_reg_val);
+	t8_val = (uint8_t)timing_reg_val;
+	t8_val &= 0x00;
+	if(!integration_option)
+	{
+
+		t8_val |= INT_137;
+		stat = i2c_write(fd,&t8_val);
+		printf("Timing register set with Int value 13.7ms:%x\n",t8_val);
+	}
+	else if(integration_option==1)
+	{
+
+		t8_val |= INT_101;
+		stat = i2c_write(fd,&t8_val);
+		printf("Timing register set with Int value 101ms:%x\n",t8_val);
+	}
+	else if(integration_option==2)
+	{
+		t8_val |= INT_402;
+		stat = i2c_write(fd,&t8_val);
+		printf("Timing register set with Int value 402ms:%x\n",t8_val);
+	}
+	else
+	{
+		printf("\nERR:Option not applicable\n");
+		stat = FAIL;
+	}
+	return stat;
+}
+
+
+enum Status control_intr_reg(uint8_t fd,uint8_t intr_option)
+{
+	uint16_t intr_val;
+	uint8_t i8_val;
+	enum Status stat;
+	stat = read_light_registers(fd,INTR,&intr_val);
+	i8_val = (uint8_t)intr_val;
+	i8_val &= 0x00;
+	if(intr_option)
+	{
+
+		i8_val |= INTR_ENABLE;
+		stat = i2c_write(fd,&i8_val);
+		printf("Interrupt register enabled:%x\n",i8_val);
+	}
+	else if(!intr_option)
+	{
+		stat = i2c_write(fd,&i8_val);
+		printf("Interrupt register disabled:%x\n",i8_val);
+	}
+	else
+	{
+		printf("\nERR:Option not applicable\n");
+		stat = FAIL;
+	}
+	return stat;
+}
+
+
+char* night_or_day()
+{
+	return light_indication;
+}
 
 enum Status light_sensor_switchon(uint8_t fd)
 {
 	enum Status stat;
-	uint8_t reg_addr=CMD_REG|CNTRL_REG;
 	uint8_t readval;
-	uint8_t on_val = 0x03;
-	stat = i2c_write(fd,&reg_addr);
+	uint8_t reg_value=CMD_REG|CNTRL_REG;
+	uint8_t on_val = ON_VALUE;
+	stat = i2c_write(fd,&reg_value);
 	if(stat)
 	{
 		printf("\nFailed control register access operation:%s\n",strerror(errno));
@@ -78,7 +409,7 @@ uint16_t read_adc0(uint8_t fd)
 	
 	if(!stat)
 	{
-		printf("\nSuccessfully read light value from ADC0 low register operation. Value is %d.\n",readval_L);
+		printf("\nSuccessfully read light value from ADC0 low register operation. Value is %x.\n",readval_L);
 	}
 	else
 	{
@@ -98,7 +429,7 @@ uint16_t read_adc0(uint8_t fd)
 	stat = i2c_read(fd,&readval_H);
 	if(!stat)
 	{
-		printf("\nSuccessfully read light value from ADC0 high register operation. Value is %d.\n",readval_H);
+		printf("\nSuccessfully read light value from ADC0 high register operation. Value is %x.\n",readval_H);
 	}
 	else 
 	{
@@ -107,7 +438,7 @@ uint16_t read_adc0(uint8_t fd)
 		exit(1);
 	}
 	final_lumen = (readval_H<<8)|readval_L;
-	printf("Final light value:%d\n",final_lumen);
+	printf("Final light value:%x\n",final_lumen);
 	return final_lumen;
 }
 
@@ -128,7 +459,7 @@ uint16_t read_adc1(uint8_t fd)
 	
 	if(!stat)
 	{
-		printf("\nSuccessfully read light value from ADC1 low register operation. Value is %d.\n",readval_L);
+		printf("\nSuccessfully read light value from ADC1 low register operation. Value is %x.\n",readval_L);
 	}
 	else
 	{
@@ -148,7 +479,7 @@ uint16_t read_adc1(uint8_t fd)
 	stat = i2c_read(fd,&readval_H);
 	if(!stat)
 	{
-		printf("\nSuccessfully read light value from ADC1 high register operation. Value is %d.\n",readval_H);
+		printf("\nSuccessfully read light value from ADC1 high register operation. Value is %x.\n",readval_H);
 	}
 	else 
 	{
@@ -179,20 +510,14 @@ double calc_lux_val(uint16_t final_lumen0,uint16_t final_lumen1)
 	return sensor_lux;
 }
 
-double light_read()
+double light_read(uint8_t fd)
 {
-	int fd;
-	fd = open("/dev/i2c-2",O_RDWR);
+
 	double light_lux;
 	uint8_t readval;
-	uint16_t final_lumen0,final_lumen1;
+	uint16_t final_lumen0,final_lumen1,tl_val,th_val,tmid_val;
 	enum Status stat;
-	if(fd<0)
-	{
-		printf("Error opening file:%s\n",strerror(errno));
-		exit(1);
-	}
-	stat = i2c_temp_init(fd,DEV_ADDR);
+	stat = i2c_light_init(fd,DEV_LIGHT_ADDR);
 	if(stat)
 	{
 		printf("\nFailed ioctl() operation:%s\n",strerror(errno));
@@ -204,11 +529,33 @@ double light_read()
 		printf("\nFailed light sensor ON operation:%s\n",strerror(errno));
 		exit(1);
 	}
+
+
+	stat = read_light_registers(fd,T_LOW,&tl_val);
+	if(stat) printf("ERR:Unable to read ID Register:%s",strerror(errno));
+	else printf("\nLOW threshold is set to:%4x\n",tl_val);
+
+	stat = read_light_registers(fd,T_HIGH,&th_val);
+	if(stat) printf("ERR:Unable to read ID Register:%s",strerror(errno));
+	else printf("\nHIGH threshold is set to:%4x\n",th_val);
+
+	tmid_val = 0x4000;
+	printf("tmid_val:%4x",tmid_val);
 	final_lumen0 = read_adc0(fd);
+	if(final_lumen0>=tl_val && final_lumen0<tmid_val)
+	{
+			light_indication =(char *)"Night";
+	}
+	else if(final_lumen0>=tmid_val && final_lumen0<=th_val)
+	{
+			light_indication =(char *)"Day";
+	}
 	final_lumen1 = read_adc1(fd);
+
 	if(final_lumen0 !=0)
 		light_lux = calc_lux_val(final_lumen0,final_lumen1);
-	printf("\n Light Lux in light read %lf\n",light_lux);
+	printf("\nLight Lux value= %lf\n",light_lux);
+
 	close(fd);	
 	return light_lux;
 
