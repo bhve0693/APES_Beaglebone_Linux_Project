@@ -14,6 +14,7 @@
 #define _MESSAGE_H
 
 #include <time.h>
+#include <mqueue.h>
 
 //Level of logs for criticality demarcation in the logfile
 typedef enum loglevel_t{

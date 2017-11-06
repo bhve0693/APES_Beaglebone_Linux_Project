@@ -21,6 +21,13 @@
 #define __I2C_TEMP_H_INCLUDED
 
 #include <stdio.h>
+#include "message.h"
+enum
+{
+	TEMP_CELSIUS,
+	TEMP_KELVIN,
+	TEMP_FAHRENHEIT
+}unit_temp; 
 
 /**
 ​ * ​ ​ @brief​ : Returns the temperature read from temperature register
@@ -127,7 +134,7 @@ enum Status write_thigh_reg(uint8_t fd,uint8_t reg,uint16_t value);
  *	 @param : reg_option - Register address to read from
   *	 @param : val - Value to read from file
 ​ */
-enum Status read_temp_register(uint8_t fd,uint8_t reg_option,uint16_t *val);
+enum Status read_temp_register(uint8_t fd,request_t reg_option,uint16_t *val);
 
 
 /**
@@ -157,7 +164,7 @@ enum Status shutdown_temp_mode(uint8_t fd,uint8_t option);
  *	 @param : reg_option - Register address to write into
   *	 @param : val - Value to write into file
 ​ */
-enum Status write_temp_register(uint8_t fd,uint8_t reg_option,uint16_t val);
+enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val);
 
 
 /**

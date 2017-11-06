@@ -10,8 +10,9 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <signal.h>
-#include "../inc/fw_i2c.h"
-#include "../inc/i2c_temp.h"
+#include "fw_i2c.h"
+#include "i2c_temp.h"
+
 
 
 #define PTR_REG 0x00
@@ -135,25 +136,25 @@ enum Status write_thigh_reg(uint8_t fd,uint8_t reg,uint16_t value)
 }
 
 
-enum Status read_temp_register(uint8_t fd,uint8_t reg_option,uint16_t *val)
+enum Status read_temp_register(uint8_t fd,request_t reg_option,uint16_t *val)
 {
 	enum Status stat;
 	uint8_t value,addr;
 	switch(reg_option)
 	{
-		case 1: addr = PTR_REG|TEMP_REG;
+		case REQ_TEMPREG_READ: addr = PTR_REG|TEMP_REG;
 				stat = read_temp_reg(fd,addr,val);
 				break;
 
-		case 2: addr = PTR_REG|CONFIG_REG;
+		case REQ_TEMPREG_CONFIG_READ: addr = PTR_REG|CONFIG_REG;
 				stat = read_config_reg(fd,addr,val);
 				break;
 
-		case 3: addr = PTR_REG|TLOW_REG;
+		case REQ_TEMPREG_DATA_LOW_READ: addr = PTR_REG|TLOW_REG;
 				stat = read_tlow_reg(fd,addr,val);
 				break;
 
-		case 4: addr = PTR_REG|THIGH_REG;
+		case REQ_TEMPREG_DATA_HIGH_READ: addr = PTR_REG|THIGH_REG;
 				stat = read_thigh_reg(fd,addr,val);
 				break;
 
@@ -219,12 +220,12 @@ enum Status shutdown_temp_mode(uint8_t fd,uint8_t option)
 }
 
 
-enum Status write_temp_register(uint8_t fd,uint8_t reg_option,uint16_t val)
+enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 {
 	enum Status stat;
 	switch(reg_option)
 	{
-		case 0:	if(val>3)
+		case REQ_TEMPREG_PTRREG_WRITE:	if(val>3)
 				{	
 					printf("ERR:Pointer register is 8 bits long with higher 6 bits set to 0\n");
 					stat = FAIL;
@@ -232,13 +233,13 @@ enum Status write_temp_register(uint8_t fd,uint8_t reg_option,uint16_t val)
 				else stat = write_ptr_reg(fd,val);
 				break;
 
-		case 2:	stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);
+		case REQ_TEMPREG_CONFIG_WRITE:	stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);
 				break;
 
-		case 3: stat = write_tlow_reg(fd,PTR_REG|TLOW_REG,val);
+		case REQ_TEMPREG_DATA_LOW_WRITE: stat = write_tlow_reg(fd,PTR_REG|TLOW_REG,val);
 				break;
 		
-		case 4: stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
+		case REQ_TEMPREG_DATA_HIGH_WRITE: stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
 				break;
 		
 		default:stat = FAIL;

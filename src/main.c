@@ -147,7 +147,7 @@ enum Status api_temp_req_hdlr()
     switch(msg_request.req_type)
     {
         case REQ_TEMP:
-            temp_value_float = temp_read(fd_temp,0);
+            temp_value_float = temp_read(fd_temp,TEMP_CELSIUS);
             sprintf(temp_buff_float,"%f",temp_value_float);
             gettimeofday(&msg_tempsensor.time_stamp, NULL);
             strcpy(msg_tempsensor.logmsg,temp_buff_float);
@@ -165,7 +165,7 @@ enum Status api_temp_req_hdlr()
             break;
         case REQ_TEMPREG_CONFIG_READ:
             printf("\nTEMP: CONFIG REGISTER REQUEST RECVD\n");
-            status = read_temp_register(fd_temp,2,&temp_value_uint16);
+            status = read_temp_register(fd_temp,REQ_TEMPREG_CONFIG_READ,&temp_value_uint16);
             sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
             gettimeofday(&api_req_msg.time_stamp, NULL);
             printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
@@ -192,7 +192,7 @@ enum Status api_temp_req_hdlr()
             break;
         case REQ_TEMPREG_READ:
             printf("\nTEMP :TEMP REGISTER REQUEST RECVD\n");
-            status = read_temp_register(fd_temp,1,&temp_value_uint16);
+            status = read_temp_register(fd_temp,REQ_TEMPREG_READ,&temp_value_uint16);
             sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
             gettimeofday(&api_req_msg.time_stamp, NULL);
             printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
@@ -220,7 +220,7 @@ enum Status api_temp_req_hdlr()
 
         case REQ_TEMPREG_DATA_LOW_READ:
             printf("\nTEMP CONFIG REQUEST RECVD\n");
-            status = read_temp_register(fd_temp,3,&temp_value_uint16);
+            status = read_temp_register(fd_temp,REQ_TEMPREG_DATA_LOW_READ,&temp_value_uint16);
             sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
             gettimeofday(&api_req_msg.time_stamp, NULL);
             printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
@@ -247,7 +247,7 @@ enum Status api_temp_req_hdlr()
             break;
         case REQ_TEMPREG_DATA_HIGH_READ: 
             printf("\nTEMP CONFIG REQUEST RECVD\n");
-            status = read_temp_register(fd_temp,4,&temp_value_uint16);
+            status = read_temp_register(fd_temp,REQ_TEMPREG_DATA_HIGH_READ,&temp_value_uint16);
             sprintf(temp_buff_uint16,"%4x",temp_value_uint16);
             gettimeofday(&api_req_msg.time_stamp, NULL);
             printf("\ntempbuff in logpacket %s\n",api_req_msg.logmsg);
@@ -275,7 +275,7 @@ enum Status api_temp_req_hdlr()
         case REQ_TEMPREG_PTRREG_WRITE:
         	printf("\nTEMP PTR WRITE REQUEST RCVD\n");
         	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
-        	status = write_temp_register(fd_temp,0,temp_write_value);
+        	status = write_temp_register(fd_temp,REQ_TEMPREG_PTRREG_WRITE,temp_write_value);
         	if(status)
         	{
         		strcpy(msg_request.logmsg,"INVALID PTR WRITE VALUE");
@@ -295,7 +295,7 @@ enum Status api_temp_req_hdlr()
         case REQ_TEMPREG_CONFIG_WRITE:
         	printf("\nTEMP CONFIG WRITE REQUEST RCVD\n");
         	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
-        	status = write_temp_register(fd_temp,2,temp_write_value);
+        	status = write_temp_register(fd_temp,REQ_TEMPREG_CONFIG_WRITE,temp_write_value);
         	if(status)
         	{
         		strcpy(msg_request.logmsg,"INVALID CONFIG WRITE VALUE");
@@ -316,7 +316,7 @@ enum Status api_temp_req_hdlr()
         case REQ_TEMPREG_DATA_LOW_WRITE:
         	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
         	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
-        	status = write_temp_register(fd_temp,3,temp_write_value);
+        	status = write_temp_register(fd_temp,REQ_TEMPREG_DATA_LOW_WRITE,temp_write_value);
         	if(status)
         	{
         		strcpy(msg_request.logmsg,"INVALID TLOW WRITE VALUE");
@@ -336,7 +336,7 @@ enum Status api_temp_req_hdlr()
         case REQ_TEMPREG_DATA_HIGH_WRITE:
         	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
         	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
-        	status = write_temp_register(fd_temp,4,temp_write_value);
+        	status = write_temp_register(fd_temp,REQ_TEMPREG_DATA_HIGH_WRITE,temp_write_value);
         	if(status)
         	{
         		strcpy(msg_request.logmsg,"INVALID THIGH WRITE VALUE");
@@ -770,6 +770,7 @@ enum Status api_read_temp_register(uint16_t *readval)
 {
     logpacket request_pck;
     logpacket req_rcv_pckt;
+    uint8_t read_val;
     uint8_t status;
 
     request_pck.req_type = REQ_TEMPREG_READ;
@@ -788,13 +789,13 @@ enum Status api_read_temp_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
-        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
         printf("\nUnable to Receive Request from source\n");
     }
-    req_processed = 0;
+    readval = &read_val;
     return SUCCESS;
 
 
@@ -803,6 +804,7 @@ enum Status api_read_temp_config_register(uint16_t *readval)
 {
     logpacket request_pck;
     logpacket req_rcv_pckt;
+    uint8_t read_val;
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_CONFIG_READ;
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
@@ -820,13 +822,13 @@ enum Status api_read_temp_config_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
-        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
         printf("\nUnable to Receive Request from source\n");
     }
-    req_processed = 0;
+    readval = &read_val;
     return SUCCESS;
 
 
@@ -836,6 +838,7 @@ enum Status api_read_temp_tlow_register(uint16_t *readval)
 {
     logpacket request_pck;
     logpacket req_rcv_pckt;
+    uint16_t read_val;
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_DATA_LOW_READ;
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
@@ -853,13 +856,14 @@ enum Status api_read_temp_tlow_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
-        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
         printf("\nUnable to Receive Request from source\n");
     }
-    req_processed = 0;
+    
+    readval = &read_val;
     return SUCCESS;
 
 
@@ -869,6 +873,7 @@ enum Status api_read_temp_thigh_register(uint16_t *readval)
 {
     logpacket request_pck;
     logpacket req_rcv_pckt;
+    uint16_t read_val;
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_DATA_HIGH_READ;
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
@@ -886,13 +891,13 @@ enum Status api_read_temp_thigh_register(uint16_t *readval)
     {   
         printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
         printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
-        *readval = (uint16_t)atoi(req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
     }
     else
     {
         printf("\nUnable to Receive Request from source\n");
     }
-    req_processed = 0;
+    readval = &read_val;
     return SUCCESS;
 
 
@@ -905,7 +910,7 @@ enum Status api_write_temp_ptr_register(uint16_t writeval)
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_PTRREG_WRITE;
     char *temp_buff = (char*)malloc(sizeof(uint16_t));
-    sprintf(temp_buff,"%d",writeval);
+    sprintf(temp_buff,"%4x",writeval);
     strcpy(request_pck.logmsg,temp_buff);
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
     printf("\nStatus Value of temp req queue %d\n",status);
@@ -934,7 +939,7 @@ enum Status api_write_temp_config_register(uint16_t writeval)
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_CONFIG_WRITE;
     char *temp_buff = (char*)malloc(sizeof(uint16_t));
-    sprintf(temp_buff,"%d",writeval);
+    sprintf(temp_buff,"%4x",writeval);
     strcpy(request_pck.logmsg,temp_buff);
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
     printf("\nStatus Value of temp req queue %d\n",status);
@@ -964,7 +969,7 @@ enum Status api_write_temp_tlow_register(uint16_t writeval)
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_DATA_LOW_WRITE;
     char *temp_buff = (char*)malloc(sizeof(uint16_t));
-    sprintf(temp_buff,"%d",writeval);
+    sprintf(temp_buff,"%4x",writeval);
     strcpy(request_pck.logmsg,temp_buff);
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
     printf("\nStatus Value of temp req queue %d\n",status);
@@ -995,7 +1000,7 @@ enum Status api_write_temp_thigh_register(uint16_t writeval)
     uint8_t status;
     request_pck.req_type = REQ_TEMPREG_DATA_HIGH_WRITE;
     char *temp_buff = (char*)malloc(sizeof(uint16_t));
-    sprintf(temp_buff,"%d",writeval);
+    sprintf(temp_buff,"%4x",writeval);
     strcpy(request_pck.logmsg,temp_buff);
     status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
     printf("\nStatus Value of temp req queue %d\n",status);
@@ -1225,12 +1230,8 @@ int main(int argc, char **argv)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-            api_write_tempreg(REQ_TEMPREG_PTRREG_WRITE,writeval);
-           // api_read_tempreg(REQ_TEMPREG_DATA_HIGH_READ,&readval);
             //api_write_tempreg(REQ_TEMPREG_PTRREG_WRITE,writeval);
-            //api_write_tempreg(REQ_TEMPREG_CONFIG_WRITE,writeval);
-            //api_write_tempreg(REQ_TEMPREG_DATA_LOW_WRITE,writeval);
-            //api_write_tempreg(REQ_TEMPREG_DATA_HIGH_WRITE,writeval);
+            api_read_tempreg(REQ_TEMPREG_CONFIG_READ,writeval);
         }
 
     }
