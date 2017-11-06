@@ -146,13 +146,13 @@ enum Status api_temp_req_hdlr()
     printf("\n Message Req Type %d\n",msg_request.req_type);
     switch(msg_request.req_type)
     {
-        case REQ_TEMP:
-            temp_value_float = temp_read(fd_temp,TEMP_CELSIUS);
+        case REQ_TEMP_CELSIUS:
+            temp_value_float = temp_read(fd_temp,REQ_TEMP_CELSIUS);
             sprintf(temp_buff_float,"%f",temp_value_float);
             gettimeofday(&msg_tempsensor.time_stamp, NULL);
             strcpy(msg_tempsensor.logmsg,temp_buff_float);
             printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
-            msg_tempsensor.req_type = REQ_TEMP;
+            msg_tempsensor.req_type = REQ_TEMP_CELSIUS;
             if(msg_tempsensor.logmsg != NULL)
             {
                 if(api_temp_log(msg_tempsensor))
@@ -161,6 +161,68 @@ enum Status api_temp_req_hdlr()
                     //ERR_Log();
                     return FAIL;
                 }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;                
+            }
+
+            break;
+        case REQ_TEMP_KELVIN:
+            temp_value_float = temp_read(fd_temp,REQ_TEMP_KELVIN);
+            sprintf(temp_buff_float,"%f",temp_value_float);
+            gettimeofday(&msg_tempsensor.time_stamp, NULL);
+            strcpy(msg_tempsensor.logmsg,temp_buff_float);
+            printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
+            msg_tempsensor.req_type = REQ_TEMP_KELVIN;
+            if(msg_tempsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_tempsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;
+            }
+            break;            
+        case REQ_TEMP_FAHRENHEIT:
+            temp_value_float = temp_read(fd_temp,REQ_TEMP_FAHRENHEIT);
+            sprintf(temp_buff_float,"%f",temp_value_float);
+            gettimeofday(&msg_tempsensor.time_stamp, NULL);
+            strcpy(msg_tempsensor.logmsg,temp_buff_float);
+            printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
+            msg_tempsensor.req_type = REQ_TEMP_FAHRENHEIT;
+            if(msg_tempsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_tempsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(temp_req_queue, (const logpacket*)&msg_tempsensor, sizeof(msg_tempsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                req_processed = 1;
             }
             break;
         case REQ_TEMPREG_CONFIG_READ:
@@ -588,6 +650,29 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     //exit_handler(SIGINT);
                 }
+                if(temp.req_type == REQ_TEMP_CELSIUS)
+                {
+                    sprintf(logbuff,"\nReceived Temperature Response in deg.C Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+
+                if(temp.req_type == REQ_TEMP_KELVIN)
+                {
+                    sprintf(logbuff,"\nReceived Temperature Response in Kelvin Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }
+                 if(temp.req_type == REQ_TEMP_FAHRENHEIT)
+                {
+                    sprintf(logbuff,"\nReceived Temperature Response in deg.F Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);
+                }               
+
                 if(temp.req_type == REQ_TEMPREG_CONFIG_READ)
                 {
                     sprintf(logbuff,"\nReceived Config Register Value :");
@@ -800,6 +885,42 @@ enum Status api_read_temp_register(uint16_t *readval)
 
 
 }
+
+enum Status api_read_temp_value(uint16_t *readval,request_t unit)
+{
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+
+    request_pck.req_type = unit;
+    status=mq_send(temp_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_temp =1;
+    while(!req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(temp_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;
+
+
+}
+
 enum Status api_read_temp_config_register(uint16_t *readval)
 {
     logpacket request_pck;
@@ -1230,8 +1351,8 @@ int main(int argc, char **argv)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-            //api_write_tempreg(REQ_TEMPREG_PTRREG_WRITE,writeval);
-            api_read_tempreg(REQ_TEMPREG_CONFIG_READ,writeval);
+            api_read_temp_value(&readval,REQ_TEMP_CELSIUS);
+            printf("\nTemperature Response is %f K\n",readval);
         }
 
     }

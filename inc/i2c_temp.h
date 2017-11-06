@@ -34,7 +34,7 @@ enum
 ​ *
 ​ * ​ ​ Returns value of float data type
 ​ */
-float temp_read(uint8_t fd,uint8_t choice);
+float temp_read(uint8_t fd,request_t choice);
 
 /**
 ​ * ​ ​ @brief​ : Calculates the temperature in Celsius and Fahrenheit 
@@ -43,7 +43,7 @@ float temp_read(uint8_t fd,uint8_t choice);
 ​ * ​ ​ @param : fd  - accepts I2C Device file descriptor
  *	 @param : addr -Resolution value
 ​ */
-float read_tempsense(uint8_t fd,float resolution,uint8_t unit_choice);
+float read_tempsense(uint8_t fd,float resolution,request_t unit_choice);
 
 
 /**

@@ -250,7 +250,7 @@ enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 
 
 
-float temp_read(uint8_t fd,uint8_t unit_choice)
+float temp_read(uint8_t fd,request_t unit_choice)
 {
 	uint8_t operation;
 	uint8_t readval;
@@ -286,7 +286,7 @@ float kelvin(float temp_kelvin)
 }
 
 
-float read_tempsense(uint8_t fd,float resolution,uint8_t unit_choice)
+float read_tempsense(uint8_t fd,float resolution,request_t unit_choice)
 {
 
 	uint8_t* buffer = (uint8_t*)malloc(sizeof(uint8_t)*2);
@@ -319,17 +319,17 @@ float read_tempsense(uint8_t fd,float resolution,uint8_t unit_choice)
 	temp_kelvin = temp_celsius+273.15;
 	printf("\n%fC,%fF.%fK\n",temp_celsius,temp_fahrenheit,temp_kelvin); 
 	free(buffer);
-	if(unit_choice== 0)
+	if(unit_choice== REQ_TEMP_CELSIUS)
 	{
-		return celsius(temp_celsius);
+		return temp_celsius;
 	}
-	else if(unit_choice==1)
+	else if(unit_choice==REQ_TEMP_FAHRENHEIT)
 	{
-		return fahrenheit(temp_fahrenheit);
+		return temp_fahrenheit;
 	}
-	else if(unit_choice==2)
+	else if(unit_choice==REQ_TEMP_KELVIN)
 	{
-		return kelvin(temp_kelvin);
+		return temp_kelvin;
 	}
 }
 
