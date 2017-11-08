@@ -39,6 +39,7 @@
 #define DEV_ADDR 0x48
 
 
+
 enum Status read_temp_reg(uint8_t fd,uint8_t reg,uint16_t *val)
 {
 	enum Status stat;
@@ -243,7 +244,7 @@ enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 					printf("ERR:Pointer register is 8 bits long with higher 6 bits set to 0\n");
 					stat = FAIL;
 				}
-				else stat = write_ptr_reg(fd,val);
+				else stat = write_ptr_reg(fd,reg_option);
 				break;
 
 		case REQ_TEMPREG_CONFIG_WRITE:	stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);

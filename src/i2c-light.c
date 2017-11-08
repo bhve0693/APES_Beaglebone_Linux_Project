@@ -20,8 +20,10 @@
 #include "fw_i2c.h"
 #include "i2c_light.h"
 
+enum brightness light_indication = DARK;
+//bright_t light_indication = DARK;
 
-char *light_indication;
+//char *light_indication;
 enum Status read_id_reg(uint8_t fd,uint8_t reg,uint8_t *val)
 {
 	enum Status stat;
@@ -355,7 +357,7 @@ enum Status control_intr_reg(uint8_t fd,uint8_t intr_option)
 }
 
 
-char* night_or_day()
+enum brightness night_or_day()
 {
 	return light_indication;
 }
@@ -553,11 +555,13 @@ double light_read(uint8_t fd)
 	final_lumen0 = read_adc0(fd);
 	if(final_lumen0>=tl_val && final_lumen0<tmid_val)
 	{
-			light_indication =(char *)"Night";
+		light_indication = DARK;
+			//light_indication =(char *)"Night";
 	}
 	else if(final_lumen0>=tmid_val && final_lumen0<=th_val)
 	{
-			light_indication =(char *)"Day";
+		light_indication = LIGHT;	
+			//light_indication =(char *)"Day";
 	}
 	final_lumen1 = read_adc1(fd);
 
@@ -565,7 +569,7 @@ double light_read(uint8_t fd)
 		light_lux = calc_lux_val(final_lumen0,final_lumen1);
 	printf("\nLight Lux value= %lf\n",light_lux);
 
-	close(fd);	
+	//close(fd);	
 	return light_lux;
 
 }

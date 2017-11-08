@@ -44,6 +44,11 @@
 #define DEV_LIGHT_ADDR 0x39
 
 
+enum brightness{
+	DARK,
+	LIGHT
+}; 
+
 /*
 ​ * ​ ​ @brief​    : Enum for indicating different Light Sensor Registers
 ​
@@ -309,7 +314,7 @@ enum Status control_intr_reg(uint8_t fd,uint8_t intr_option);
  *    
 ​ * ​ ​ @param : none
 ​ */
-char* night_or_day(void);
+enum brightness night_or_day(void);
 
 
 #endif

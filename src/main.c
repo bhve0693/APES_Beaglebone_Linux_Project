@@ -24,14 +24,20 @@
 #include "fw_i2c.h"
 #include "i2c_temp.h"
 #include "i2c_light.h"
+
 #define MSG_QUEUE "/msg_queue"
 #define HB_TEMP_QUEUE "/hb_temp_queue"
 #define HB_LIGHT_QUEUE "/hb_light_queue"
 #define HB_TEMP_REQ_QUEUE "/temp_req_queue"
+#define DECISION_QUEUE "/decision_queue"
+#define LIGHT_REQ_QUEUE "/light_req_queue"
+
 
 #define LIGHT_HB_CHECK_CNT 1
 #define TEMP_HB_CHECK_CNT  2
 #define LOG_HB_CHECK_CNT   3
+
+#define TEMP_HIGH_ALARM 25 
 
 #define HB_LOG_QUEUE "/hb_log_queue"
 #define MAX_LOG_SIZE     9999
@@ -40,35 +46,39 @@ char logbuff[MAX_LOG_SIZE];
 pthread_t tempsensor_thread;
 pthread_t lightsensor_thread;
 pthread_t synclogger_thread;
+pthread_t decision_thread;
+
 struct mq_attr mq_attr_queue;
 struct mq_attr mq_attr_hb_queue;
 struct mq_attr mq_attr_log_queue;
 struct mq_attr mq_attr_temp_req_queue;
 
-static volatile sig_atomic_t blocking = 1;
 static volatile sig_atomic_t light_flag = 0;
 static volatile sig_atomic_t temp_flag = 0;
 static volatile sig_atomic_t request_flag_temp = 0;
+static volatile sig_atomic_t request_flag_light = 0;
 static volatile sig_atomic_t req_processed = 0;
+static volatile sig_atomic_t light_req_processed = 0;
 static volatile sig_atomic_t write_complete = 0;
+static volatile sig_atomic_t light_write_complete = 0;
 static volatile sig_atomic_t req_cnt = 0;
 static volatile sig_atomic_t shutdown_disable_complete = 0;
 static volatile sig_atomic_t shutdown_enable_complete = 0;
 static volatile sig_atomic_t conv_rate_set = 0;
+static volatile sig_atomic_t retry_light_log = 0;
+static volatile sig_atomic_t retry_temp_log = 0;
+static volatile sig_atomic_t api_request = 0;
+
+static enum brightness prev_bright_status = DARK;
 
 pthread_cond_t sig_logger;
 pthread_mutex_t logger_mutex;
-pthread_cond_t proceed_init;
-pthread_mutex_t proceed_init_mutex;
 pthread_mutex_t msg_temp_mutex;
 pthread_mutex_t msg_light_mutex;
 pthread_cond_t sig_req_process;
 pthread_mutex_t req_process_mutex;
-
-pthread_mutex_t i2c_init_mutex;
-pthread_mutex_t i2c_rw_mutex;
-//pthread_mutex_t msg_light_mutex;
-
+pthread_cond_t cond_decision;
+pthread_mutex_t cond_mutex;
 
 uint8_t fd_temp;
 uint8_t fd_light;
@@ -81,10 +91,12 @@ static mqd_t hb_temp_queue;
 static mqd_t hb_light_queue;
 static mqd_t hb_log_queue;
 static mqd_t temp_req_queue;
+static mqd_t decision_queue;
+static mqd_t light_req_queue;
+
 
 FILE *fp;
-char *i2c_temp_fname = "/dev/i2c-2";
-char *i2c_light_fname = "/dev/i2c-2";
+
 //static unsigned int counter;
 static volatile sig_atomic_t counter =0;
 logpacket msg_tempsensor,msg_lightsensor, msg_synclogger;
@@ -100,7 +112,7 @@ void exit_handler(int sig) {
     pthread_cancel(tempsensor_thread);
     pthread_cancel(lightsensor_thread);
     pthread_cancel(synclogger_thread);
-    
+    pthread_cancel(decision_thread);
     mq_close(msg_queue);
     mq_unlink(MSG_QUEUE);
     mq_close(hb_light_queue);
@@ -111,6 +123,11 @@ void exit_handler(int sig) {
     mq_unlink(HB_LOG_QUEUE);
     mq_close(temp_req_queue);
     mq_unlink(HB_TEMP_REQ_QUEUE);
+    mq_close(decision_queue);
+    mq_unlink(DECISION_QUEUE);
+    mq_close(light_req_queue);
+    mq_unlink(LIGHT_REQ_QUEUE);
+    
    // if(fd_temp !=NULL)
     //fclose(fd_temp);
     if(fp!=NULL)
@@ -125,13 +142,47 @@ enum Status api_temp_log(logpacket msg)
     status=mq_send(hb_log_queue, (const logpacket*)&msg, sizeof(msg),1);
     if(status == -1)
     {
-        printf("\ntemp was unable to send log message\n");
+        printf("\nERR: TEMP Task was unable to send log message\n");
         return FAIL;
         //ERR_Log();
     }
     pthread_cond_signal(&sig_logger);
 
 
+    return SUCCESS;
+
+}
+
+enum Status api_light_log(logpacket msg)
+{
+    uint8_t status;
+    
+    status=mq_send(hb_log_queue, (const logpacket*)&msg, sizeof(msg),1);
+    if(status == -1)
+    {
+        printf("\nERR:LIGHT Task was unable to send log message\n");
+        return FAIL;
+        //ERR_Log();
+    }
+    pthread_cond_signal(&sig_logger);
+
+
+    return SUCCESS;
+
+}
+
+enum Status api_sendto_decision_queue(logpacket msg)
+{
+    uint8_t status;
+    logpacket local_msg;
+    status=mq_send(decision_queue, (const logpacket*)&msg, sizeof(msg),1);
+    if(status == -1)
+    {
+        printf("\n DQ API was unable to send log message\n");
+        return FAIL;
+        //ERR_Log();
+    }
+    pthread_cond_signal(&cond_decision);
     return SUCCESS;
 
 }
@@ -529,7 +580,7 @@ enum Status api_temp_req_hdlr()
 
     }
                     
-
+    api_request =0;
     return SUCCESS;
 }
 
@@ -538,22 +589,15 @@ enum Status init_tempsensor_task()
 {
     uint8_t status;
     logpacket msg;
-    fd_temp = open(i2c_temp_fname,O_RDWR);
+    
+    fd_temp = open("/dev/i2c-2",O_RDWR);
     if(fd_temp<0)
     {
         printf("\nFailed to Open\n ");
         return FAIL;
         //ERR_Log();
     }
-    /*if(pthread_mutex_lock(&i2c_init_mutex) !=0)
-    {
-        printf("\nERR: Unable to Lock\n");
-    }*/
     status = i2c_temp_init(fd_temp,0x48);
-    /*if(pthread_mutex_unlock(&i2c_init_mutex))
-    {
-        printf("\nERR: Unable to unlock\n");
-    }*/
     if(status)
     {
         printf("\nERR:Failed to Init I2C\n ");
@@ -562,10 +606,10 @@ enum Status init_tempsensor_task()
     }
     msg.sourceid = SRC_TEMPERATURE;
     msg.level = LOG_INIT;
-    char *init_msg = "\nTEMP :Initialization Done";
+    char *init_msg = "TEMP :Initialization Done";
     strcpy(msg.logmsg,init_msg);
     api_temp_log(msg);
-    pthread_cond_signal(&proceed_init);
+
     return SUCCESS;
 }
 
@@ -575,7 +619,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
     uint8_t status;
     uint8_t temp_count;
     logpacket msg_request;
-    usecs = 10000;
+    usecs = 1000000;
     printf("\nIn Temperature Sensor Thread execution\n");
     //Creating Log message in logpacket
     status = init_tempsensor_task();
@@ -586,7 +630,7 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
         //Log Error in Log Queue
     }
     
-    float temp_value = 0;
+    float temp_value;
     //float temp_value = 35.02;
     char *temp_buff = (char*)malloc(sizeof(float));
     if(!temp_buff)
@@ -602,16 +646,8 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             exit_handler(SIGINT);
             //ERR_Log();
         }
-        /*if(pthread_mutex_lock(&i2c_rw_mutex) !=0)
-        {
-            printf("\nERR: Unable to Lock\n");
-        }*/
-        temp_value = temp_read(fd_light,REQ_TEMP_CELSIUS);
-        //temp_value++;
-        if(pthread_mutex_unlock(&i2c_rw_mutex) !=0)
-        {
-            printf("\nERR: Unable to unlock\n");
-        }
+        if(!api_request)
+        temp_value = temp_read(fd_temp,REQ_TEMP_CELSIUS);
         sprintf(temp_buff,"%f",temp_value);
         gettimeofday(&msg_tempsensor.time_stamp, NULL);
         strcpy(msg_tempsensor.logmsg,temp_buff);
@@ -622,11 +658,40 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             if(api_temp_log(msg_tempsensor))
             {
                 printf("\ntemp was unable to send log message\n");
+                retry_temp_log = 1;
                 //ERR_log();
+            }
+            if(api_sendto_decision_queue(msg_tempsensor))
+            {
+                printf("\ntemp was unable to send logs to DQ\n");
+                    //ERR_log();
             }
 
         }
         usleep(usecs);
+        if(retry_temp_log)
+        {
+            printf("\nTEMP:trying Logging due to previous fail\n");
+            temp_value = temp_read(fd_temp,REQ_TEMP_CELSIUS);
+            sprintf(temp_buff,"%f",temp_value);
+            gettimeofday(&msg_tempsensor.time_stamp, NULL);
+            strcpy(msg_tempsensor.logmsg,temp_buff);
+            printf("\ntempbuff in logpacket %s\n",msg_tempsensor.logmsg);
+            msg_tempsensor.sourceid = SRC_TEMPERATURE;
+            if(msg_tempsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_tempsensor))
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    //ERR_log();
+                }
+                
+
+            }
+
+            retry_temp_log = 0;
+
+        }
         if(request_flag_temp)
         {
             printf("\nRequest Flag Set\n");
@@ -645,10 +710,6 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             {
                 printf("\nReceive Heartbeat temp request: %d\n", temp_count);
                 hb_temp_cnt+=1;
-                if(hb_temp_cnt %200 == 0)
-                {
-                    hb_temp_cnt = 0;   
-                }
                 status=mq_send(hb_temp_queue, (const char*)&hb_temp_cnt, sizeof(counter),1);
 
             }
@@ -662,33 +723,20 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
 	//Log data into log queues 
 
 }
- 
+
 enum Status init_lightsensor_task()
 {
     uint8_t status;
     logpacket msg;
-    //pthread_mutex_lock()
-    pthread_cond_wait(&proceed_init,&proceed_init_mutex);
     printf("\nInit Light Task\n");
-    //if(!fd_temp)
-    //{
-        fd_light= open(i2c_light_fname,O_RDWR);
-    //}
+    fd_light= open("/dev/i2c-2",O_RDWR);
     if(fd_light<0)
     {
         printf("\nFailed to Open\n ");
         return FAIL;
         //ERR_Log();
     }
-   /* if(pthread_mutex_lock(&i2c_init_mutex) !=0)
-    {
-        printf("\nERR: Unable to Lock\n");
-    }*/
     status = i2c_light_init(fd_light,DEV_LIGHT_ADDR);
-    /*if(pthread_mutex_unlock(&i2c_init_mutex) !=0)
-    {
-        printf("\nERR: Unable to Lock\n");
-    }*/
     if(status)
     {
         printf("\nERR:Failed to Init I2C\n ");
@@ -697,11 +745,700 @@ enum Status init_lightsensor_task()
     }
     msg.sourceid = SRC_LIGHT;
     msg.level = LOG_INIT;
-    char *init_msg = "\nLIGHT :Initialization Done";
+    char *init_msg = "\nLIGHT :Initialization Done\n";
     strcpy(msg.logmsg,init_msg);
     api_temp_log(msg);
 
     return SUCCESS;
+}
+
+
+
+enum Status api_read_light_id_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_IDREG_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+
+enum Status api_read_light_tlow_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_TLOW_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+
+enum Status api_read_light_thigh_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_THIGH_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+enum Status api_read_light_ctrl_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_CRTL_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+enum Status api_read_light_adc0_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_ADC0_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+enum Status api_read_light_adc1_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_ADC1_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+
+enum Status api_read_light_intr_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_INTRREG_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+enum Status api_read_light_timing_register(uint16_t *readval)
+{
+
+    logpacket request_pck;
+    logpacket req_rcv_pckt;
+    uint8_t read_val;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_TIMINGREG_READ;
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of temp req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    printf("\n  Request Processed by Temp Task\n");
+    status = mq_receive(light_req_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+    if(status >0)
+    {   
+        printf("\n Receivig Request Type %d\n",req_rcv_pckt.req_type);
+        printf("\nRecevied Value from Temp Sensor %s\n",req_rcv_pckt.logmsg);
+        read_val = (uint16_t)atoi(req_rcv_pckt.logmsg);
+    }
+    else
+    {
+        printf("\nUnable to Receive Request from source\n");
+    }
+    readval = &read_val;
+    return SUCCESS;	
+
+}
+
+
+enum Status api_write_light_tlow_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_TLOW_WRITE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+	
+}
+
+
+
+
+
+
+
+enum Status api_light_req_hdlr()
+{
+
+    logpacket msg_request;
+    logpacket api_req_msg;
+    msg_request.req_type = -1;
+    uint8_t status;
+    char *light_buff_float = (char*)malloc(sizeof(float));
+    char *light_buff_uint16 = (char*)malloc(sizeof(uint16_t));
+    uint16_t light_value_uint16;
+    float temp_value_float;
+    uint16_t light_write_value;
+    status = mq_receive(light_req_queue,(logpacket*)&msg_request, sizeof(msg_request), NULL);
+    if(status >0)
+    {
+        printf("\nReceived Request from source\n");
+    }
+    else
+    {
+        return FAIL;
+        //ERR_Log();
+    }
+    printf("\n Message Req Type %d\n",msg_request.req_type);
+    switch(msg_request.req_type)
+    {
+    	case REQ_IDREG_READ:
+            if(read_light_registers(fd_light,ID,&light_value_uint16))
+            {
+            	printf("\nERR: Light ID REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_IDREG_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;
+    	case REQ_LIGHT_TLOW_READ:
+            if(read_light_registers(fd_light,T_LOW,&light_value_uint16))
+            {
+            	printf("\nERR: Light TLOW REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_TLOW_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;             
+    	case REQ_LIGHT_THIGH_READ:
+            if(read_light_registers(fd_light,T_HIGH,&light_value_uint16))
+            {
+            	printf("\nERR: Light THIGH REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_THIGH_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;    
+
+    	case REQ_LIGHT_CRTL_READ:
+            if(read_light_registers(fd_light,CNTRL,&light_value_uint16))
+            {
+            	printf("\nERR: Light CTRL REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_CRTL_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break; 
+            
+    	case REQ_LIGHT_ADC0_READ:
+            if(read_light_registers(fd_light,ADC0,&light_value_uint16))
+            {
+            	printf("\nERR: Light CTRL REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_ADC0_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;             
+    	case REQ_LIGHT_ADC1_READ:
+            if(read_light_registers(fd_light,ADC1,&light_value_uint16))
+            {
+            	printf("\nERR: Light CTRL REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_ADC1_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;   
+    	case REQ_LIGHT_INTRREG_READ:
+            if(read_light_registers(fd_light,INTR,&light_value_uint16))
+            {
+            	printf("\nERR: Light CTRL REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_INTRREG_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;
+
+        case REQ_LIGHT_TIMINGREG_READ:
+            if(read_light_registers(fd_light,TIMING,&light_value_uint16))
+            {
+            	printf("\nERR: Light CTRL REG Failed\n");
+            	status = FAIL;
+            }
+            sprintf(light_buff_uint16,"%2x",light_value_uint16);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg,light_buff_uint16);
+            printf("\ntempbuff in logpacket %s\n",msg_lightsensor.logmsg);
+            msg_lightsensor.req_type = REQ_LIGHT_TIMINGREG_READ;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                if(api_temp_log(msg_lightsensor))
+                {
+                    printf("\ntemp was unable to log data request\n");
+                    //ERR_Log();
+                    return FAIL;
+                }
+                pthread_cond_signal(&sig_req_process);
+                status=mq_send(light_req_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\ntemp was unable to send log message\n");
+                    return FAIL;
+                    //ERR_Log();
+                }
+                light_req_processed = 1;                
+            }
+
+            break;  
+
+		case REQ_LIGHT_TLOW_WRITE:
+			light_write_value = (uint16_t)atoi(msg_request.logmsg);
+            if(write_light_registers(fd_light,T_LOW,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID TLOW WRITE VALUE");
+            	status = FAIL;
+            }
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            
+            
+
+            break;
+
+    }  	
+
+
+}
+
+
+enum Status api_read_lightreg(request_t reg_request,uint16_t *readval)
+{
+	enum Status state;
+    switch(reg_request)
+    {
+        case REQ_IDREG_READ:
+            state = api_read_light_id_register(readval);
+            break;
+        case REQ_LIGHT_TLOW_READ:
+        	state = api_read_light_tlow_register(readval);
+        	break;    
+        case REQ_LIGHT_THIGH_READ: 
+            state = api_read_light_thigh_register(readval);
+            break;
+        case REQ_LIGHT_CRTL_READ:
+        	state = api_read_light_ctrl_register(readval);
+        	break;
+        case REQ_LIGHT_ADC0_READ:
+        	state = api_read_light_adc0_register(readval);
+        	break;     
+		case REQ_LIGHT_ADC1_READ:
+        	state = api_read_light_adc1_register(readval);
+        	break; 
+       	case REQ_LIGHT_INTRREG_READ:
+       		state = api_read_light_intr_register(readval);
+        	break;
+        case REQ_LIGHT_TIMINGREG_READ:
+       		state = api_read_light_timing_register(readval);
+        	break;
+
+        /*case REQ_TEMPREG_DATA_LOW_READ: 
+            state = api_read_temp_tlow_register(readval);
+            break;
+        case REQ_TEMPREG_DATA_HIGH_READ: 
+            state = api_read_temp_thigh_register(readval);
+            break;
+        default:
+        	state = FAIL;
+        	break;*/                                   
+    }
+    return state;	
+
+}
+
+enum Status api_write_lightreg(request_t reg_request,uint16_t writeval)
+{
+	enum Status state;
+	api_request =1;
+	printf("\n API_Request %d\n\n\n",api_request);
+	switch(reg_request)
+	{
+        case REQ_LIGHT_TLOW_WRITE:
+            state = api_write_light_tlow_register(writeval);
+            break;
+        /*case REQ_LIGHTREG_CONFIG_WRITE: 
+            state = api_write_temp_config_register(writeval);
+            break;
+        case REQ_LIGHTREG_DATA_LOW_WRITE: 
+            state = api_write_temp_tlow_register(writeval);
+            break;
+        case REQ_LIGHTREG_DATA_HIGH_WRITE: 
+            state = api_write_temp_thigh_register(writeval);
+            break;*/
+        default:
+        	state = FAIL;
+        	break;      		
+	}
+	return state;
 }
 
 void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
@@ -710,56 +1447,134 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
     int status;
     int recvcounter;
     uint8_t temp_count;
-    usecs = 45000;
+    enum brightness curr_bright_status = DARK;
+    //usecs = 10000000;
+    usecs = 10000000;
     printf("\nIn Light Sensor Thread execution\n");
     printf("\nRecvcounter is %d\n",recvcounter);
-    init_lightsensor_task();
-    double temp_value;
-    char *temp_buff = (char*)malloc(sizeof(float));
-    if(!temp_buff)
+    float temp_value_light = 38.02;
+    char *temp_buff_light = (char*)malloc(sizeof(float));
+    if(!temp_buff_light)
     {
         printf("\nERR:Malloc Error");
     }
+    init_lightsensor_task();
 
+
+    /*sprintf(temp_buff,"%f",temp_value);
+    //msg_tempsensor.msg_size = strlen(temp_buff);
+    gettimeofday(&msg_lightsensor.time_stamp, NULL);
+    msg_lightsensor.logmsg = NULL;
+    msg_lightsensor.logmsg = (uint8_t*)temp_buff;
+    msg_lightsensor.sourceid = SRC_LIGHT;
+    if(msg_lightsensor.logmsg != NULL)
+    {
+        status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+        if(status == -1)
+        {
+            printf("\ntemp was unable to send log message\n");
+        }
+       // pthread_cond_signal(&sig_logger);
+    }*/
 
     while(1)
     {
+        //Send Light Data
+        //Send Day or Night Status
+        //
         
-       /* status = mq_receive(msg_queue,(char*)&recvcounter, sizeof(recvcounter), NULL);
+        status = mq_receive(msg_queue,(char*)&recvcounter, sizeof(recvcounter), NULL);
         if(status >0)
         {
             printf("\nRecevied Message in Lightsensor Thread : %d\n",recvcounter);
             counter+=1;
-            if(counter % 200 == 0)
-            {
-                counter = 0;
-            }
-        }*/
-        /*if(pthread_mutex_lock(&i2c_rw_mutex) !=0)
+        }
+        if(!api_request)
+        temp_value_light = light_read(fd_light);
+        curr_bright_status = night_or_day();
+        if(curr_bright_status == DARK && prev_bright_status == LIGHT)
         {
-            printf("\nERR: Unable to Lock\n");
-        }*/
-        temp_value = light_read(fd_temp);
-        /*if(pthread_mutex_unlock(&i2c_rw_mutex) !=0)
+            strcpy(msg_lightsensor.logmsg,"0");
+            msg_lightsensor.sourceid = SRC_LIGHT;
+            api_sendto_decision_queue(msg_lightsensor);
+            strcpy(msg_lightsensor.logmsg,"\nSudden Change from Bright to Dark\n");
+            api_light_log(msg_lightsensor);
+
+        }
+
+        else if(curr_bright_status == LIGHT && prev_bright_status == DARK)
         {
-            printf("\nERR: Unable to unlock\n");
-        }*/
-        sprintf(temp_buff,"%lf",temp_value);
+            strcpy(msg_lightsensor.logmsg,"1");
+            msg_lightsensor.sourceid = SRC_LIGHT;
+            api_sendto_decision_queue(msg_lightsensor);
+            strcpy(msg_lightsensor.logmsg,"\nSudden Change from Dark to Bright\n");
+            api_light_log(msg_lightsensor);
+        }
+
+        prev_bright_status = curr_bright_status;
+
+        sprintf(temp_buff_light,"%lf",temp_value_light);
         //msg_tempsensor.msg_size = strlen(temp_buff);
         gettimeofday(&msg_lightsensor.time_stamp, NULL);
-        strcpy(msg_lightsensor.logmsg, temp_buff);
+        strcpy(msg_lightsensor.logmsg, temp_buff_light);
         msg_lightsensor.sourceid = SRC_LIGHT;
         if(msg_lightsensor.logmsg != NULL)
         {
-            status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+            api_light_log(msg_lightsensor);
+            /*status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
             if(status == -1)
             {
-                printf("\ntemp was unable to send log message\n");
+                printf("\nERR:Light was unable to send log message\n");
+                retry_light_log = 1;
             }
-            //pthread_cond_signal(&sig_logger);
+            pthread_cond_signal(&sig_logger);*/
         }
-        //temp_value++;
+        //temp_value_light++;
+
+
         usleep(usecs);
+        status = mq_receive(msg_queue,(char*)&recvcounter, sizeof(recvcounter), NULL);
+        if(status >0)
+        {
+            printf("\nRecevied Message in Lightsensor Thread : %d\n",recvcounter);
+            counter+=1;
+        }
+
+        if(retry_light_log)
+        {
+            printf("\nLight: Retrying Logging due to previous fail\n");
+            temp_value_light = light_read(fd_light);
+            sprintf(temp_buff_light,"%lf",temp_value_light);
+            //msg_tempsensor.msg_size = strlen(temp_buff);
+            gettimeofday(&msg_lightsensor.time_stamp, NULL);
+            strcpy(msg_lightsensor.logmsg, temp_buff_light);
+            msg_lightsensor.sourceid = SRC_LIGHT;
+            if(msg_lightsensor.logmsg != NULL)
+            {
+                api_light_log(msg_lightsensor);
+                /*status=mq_send(hb_log_queue, (const logpacket*)&msg_lightsensor, sizeof(msg_lightsensor),1);
+                if(status == -1)
+                {
+                    printf("\nERR:Light was unable to send log message\n");
+                }
+                pthread_cond_signal(&sig_logger);*/
+            }
+            retry_light_log = 0;
+        }
+
+
+        if(request_flag_light)
+        {
+            printf("\nLight : Request Flag Set\n");
+            if(api_light_req_hdlr())
+            {
+                printf("\nERR: Light Task Unable to Handle Request\n");
+                //ERR_log();
+            }
+            request_flag_light = 0;
+        }
+
+
         if(light_flag)
         {
             status = mq_receive(hb_light_queue,(char*)&temp_count, sizeof(counter), NULL);
@@ -767,10 +1582,6 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
             {
                 printf("\nReceive Heartbeat request: %d\n", temp_count);
                 hb_light_cnt+=1;
-                if(hb_light_cnt %200 == 0)
-                {
-                    hb_light_cnt = 0;
-                }
                 status=mq_send(hb_light_queue, (const char*)&hb_light_cnt, sizeof(counter),1);
 
             }
@@ -801,7 +1612,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 		pthread_exit(NULL);
 	} 
     uint32_t usecs;
-    usecs = 20000;
+    usecs = 2000000;
 	//Wait on temperature Thread to log
     while(1)
     {
@@ -824,13 +1635,13 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     if(temp.level == LOG_INIT)
                     {
                         strcpy(logbuff,temp.logmsg);
+                        
                     }
                     else
                     {
                         sprintf(logbuff,"\n[ %ld sec, %ld usecs] LUX :", temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
                         strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     }
-                    
                    // sprintf(logbuff,"%s","\n[1sec,44usec] LUX :");
                 }
                 else if(temp.sourceid == SRC_TEMPERATURE)
@@ -838,15 +1649,130 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     if(temp.level == LOG_INIT)
                     {
                         strcpy(logbuff,temp.logmsg);
+                        
                     }
                     else
                     {
                         sprintf(logbuff,"\n[ %ld sec, %ld usec] TEMP :",temp.time_stamp.tv_sec,temp.time_stamp.tv_usec);
                         strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     }    
-
                     //sprintf(logbuff,"%s","\n[1sec,44usec] TEMP :");
                 }
+                if(temp.req_type == REQ_IDREG_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for IDREG :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }
+
+                if(temp.req_type == REQ_LIGHT_TLOW_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for TLOW READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }
+
+
+                if(temp.req_type == REQ_LIGHT_THIGH_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for THIGH READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }
+                if(temp.req_type == REQ_LIGHT_CRTL_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for Control Register READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }   
+                if(temp.req_type == REQ_LIGHT_ADC0_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for ADC0 Register READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }                             
+                if(temp.req_type == REQ_LIGHT_ADC1_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for ADC1 READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }
+                if(temp.req_type == REQ_LIGHT_INTRREG_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for Intreg READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }                               
+
+                if(temp.req_type == REQ_LIGHT_TIMINGREG_READ)
+                {
+                    sprintf(logbuff,"\nReceived Light Response in for Timing reg READ :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);                	
+
+                }
+
+
+                if(temp.req_type == REQ_LIGHT_TLOW_WRITE)
+                {
+                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                } 
+
+                if(temp.req_type == REQ_LIGHT_THIGH_WRITE)
+                {
+                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }    
+
+                if(temp.req_type == REQ_LIGHT_CRTL_WRITE)
+                {
+                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }      
+
+                if(temp.req_type == REQ_LIGHT_TIMINGREG_WRITE)
+                {
+                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }                   
+
+                if(temp.req_type == REQ_LIGHT_INTRREG_WRITE)
+                {
+                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }              
+
                 if(temp.req_type == REQ_POWEROFF)
                 {
                     sprintf(logbuff,"\nReceived Data Request to Temperature Task! Exiting App!");
@@ -978,7 +1904,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);
                 }                  
-                //strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                
                 fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                 //fwrite((uint8_t*)temp.logmsg,1, strlen((uint8_t*)temp.logmsg)*sizeof(uint8_t),fp);
             }    
@@ -1165,6 +2091,8 @@ enum Status api_read_temp_value(uint16_t *readval,request_t unit)
 
 
 }
+
+
 
 enum Status api_read_temp_config_register(uint16_t *readval)
 {
@@ -1393,6 +2321,8 @@ enum Status api_write_temp_thigh_register(uint16_t writeval)
 enum Status api_write_tempreg(request_t reg_request,uint16_t writeval)
 {
 	enum Status state;
+	api_request =1;
+	printf("\n API_Request %d\n\n\n",api_request);
 	switch(reg_request)
 	{
         case REQ_TEMPREG_PTRREG_WRITE:
@@ -1412,8 +2342,8 @@ enum Status api_write_tempreg(request_t reg_request,uint16_t writeval)
         	break;      		
 	}
 	return state;
-
 }
+
 enum Status api_read_tempreg(request_t reg_request,uint16_t *readval)
 {
 	enum Status state;
@@ -1514,6 +2444,63 @@ enum Status api_temp_rqt_shutdown(uint8_t option)
 	}
 }
 
+void *app_decision_task(void *args)
+{
+    printf("\nStarted Decision Task\n");
+    float temp = 0;
+    int light = 0;
+    logpacket req_rcv_pckt;
+    req_rcv_pckt.sourceid = -1;
+    uint8_t status;
+    while(1)
+    {
+        pthread_cond_wait(&cond_decision,&cond_mutex);
+        status = mq_receive(decision_queue,(logpacket *)&req_rcv_pckt, sizeof(logpacket), NULL);
+        if(status >0)
+        {   
+            if(req_rcv_pckt.sourceid == SRC_TEMPERATURE)
+            {
+                temp = atof(req_rcv_pckt.logmsg);
+                if(temp > TEMP_HIGH_ALARM)
+                {
+                    printf("\nHigh Temperature! Check the USR LED toggle\n");
+                    //dec_led_toggle();
+                    dec_led1_on();
+                    //usleep(10);
+                }
+                else
+                {
+                    dec_led1_off();
+                    //dec_led_off();
+                }
+            }
+            if(req_rcv_pckt.sourceid == SRC_LIGHT)
+            {   
+                light = atoi(req_rcv_pckt.logmsg);
+                if(!light)
+                {
+                    printf("\nUSR LED2 Turning ON for BRIGHT to DARK Condition\n");
+                    dec_led2_on();
+                }
+                else
+                {
+                    printf("\nUSR LED2 Toggling for DARK to BRIGHT Condition\n");
+                    dec_led2_toggle();
+                }
+                //if()
+                /*dec_led_toggle();
+                usleep(10);*/
+            }
+        }
+        
+        else
+        {
+            printf("\nDECISION TASK:Unable to Receive Request from source\n");
+        }
+    }    
+
+}
+
 int main(int argc, char **argv)
 {
     
@@ -1572,6 +2559,10 @@ int main(int argc, char **argv)
     hb_log_queue = mq_open(HB_LOG_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
     mq_unlink(HB_TEMP_REQ_QUEUE);
     temp_req_queue = mq_open(HB_TEMP_REQ_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_temp_req_queue);
+    mq_unlink(DECISION_QUEUE);
+    decision_queue = mq_open(DECISION_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
+	mq_unlink(LIGHT_REQ_QUEUE);
+    light_req_queue = mq_open(LIGHT_REQ_QUEUE,O_CREAT|O_RDWR|O_NONBLOCK, 0666, &mq_attr_log_queue);
 
     if(msg_queue == -1)
     {
@@ -1597,6 +2588,18 @@ int main(int argc, char **argv)
         exit(0);
     }
 
+    if(decision_queue == -1)
+    {
+        printf("\nUnable to open message queue! Exiting\n");
+        exit(0);
+    }
+
+    if(light_req_queue == -1)
+    {
+        printf("\nUnable to open message queue! Exiting\n");
+        exit(0);
+    }
+
     if(pthread_cond_init(&sig_logger,NULL))
     {
     	printf("\nERR: Failure to init condition\n");
@@ -1615,37 +2618,22 @@ int main(int argc, char **argv)
         
     }
     
-
-    if(pthread_mutex_init(&proceed_init_mutex,NULL))
-    {
-        printf("\nERR: Failure to init condition\n");
-        
-    }
-
-    if(pthread_cond_init(&proceed_init,NULL))
-    {
-        printf("\nERR: Failure to init condition\n");
-        
-    }
-
-
     if(pthread_mutex_init(&req_process_mutex,NULL))
     {
         printf("\nERR: Failure to init condition\n");
         
     } 
-
-    if(pthread_mutex_init(&i2c_init_mutex,NULL))
+    if(pthread_cond_init(&cond_decision,NULL))
     {
         printf("\nERR: Failure to init condition\n");
         
-    } 
-
-    if(pthread_mutex_init(&i2c_rw_mutex,NULL))
+    }
+    
+    if(pthread_mutex_init(&cond_mutex,NULL))
     {
         printf("\nERR: Failure to init condition\n");
         
-    }     
+    }         
     if(hb_log_queue == -1)
     {
         printf("\nUnable to open message queue! Exiting\n");
@@ -1674,6 +2662,12 @@ int main(int argc, char **argv)
     	//Log Error 
     }
     
+    if(pthread_create(&decision_thread, &attr, (void*)&app_decision_task, NULL))
+    {
+        printf("\nERR: Failure to create thread\n");
+        //Log Error 
+    }
+
     status=mq_send(msg_queue, (const char*)&temp_counter, sizeof(temp_counter),1);
     if(status == -1)
     {
@@ -1691,11 +2685,16 @@ int main(int argc, char **argv)
         //Testing Querry APIs of Temperature Task
         api_count++;
         uint16_t readval;
-        uint16_t writeval = 0x68a0;
+        uint16_t writeval = 0xFF00;
         if (api_count == 1 && !req_processed)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
+            api_write_lightreg(REQ_LIGHT_TLOW_WRITE,writeval);
+            //api_read_light_id_register
+            //api_read_lightreg(REQ_LIGHT_TIMINGREG_READ, &readval);
+            //api_write_tempreg(REQ_TEMPREG_DATA_HIGH_WRITE,writeval);
+            //a
         	//api_temp_rqt_shutdown(0);
         }
 
@@ -1704,6 +2703,7 @@ int main(int argc, char **argv)
     pthread_join(tempsensor_thread, NULL);
  	pthread_join(lightsensor_thread, NULL);
 	pthread_join(synclogger_thread, NULL);
+    pthread_join(decision_thread, NULL);
     exit_handler(SIGINT);
 	return 0;
 

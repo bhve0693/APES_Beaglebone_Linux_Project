@@ -49,7 +49,7 @@ enum Status i2c_light_init(uint8_t fd,uint8_t addr)
 			stat =  FAIL;
 		}
 		stat = SUCCESS;
-		stat = write_light_registers(fd,T_LOW,0x0000);
+		stat = write_light_registers(fd,T_LOW,0x1500);
 		if (stat)
 		{
 			printf("\nERR:Could not write value into T_LOW Register\n");

@@ -22,6 +22,7 @@
 
 #include <stdio.h>
 #include "message.h"
+
 enum
 {
 	TEMP_CELSIUS,
