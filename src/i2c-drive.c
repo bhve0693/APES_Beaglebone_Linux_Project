@@ -92,8 +92,10 @@ enum Status i2c_write_word(uint8_t fd,uint8_t *val)
 
 enum Status i2c_write_light(uint8_t fd,uint8_t *val)
 {
+
 	if(write(fd,val,2)!=2)
 	{
+
 		return FAIL;
 	}
 	return SUCCESS;

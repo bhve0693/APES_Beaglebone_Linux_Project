@@ -21,6 +21,7 @@
 #define __FW_I2C_H_INCLUDED
 
 #include <stdio.h>
+#include <stdint.h>
 
 
 /*

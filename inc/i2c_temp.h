@@ -22,6 +22,21 @@
 
 #include <stdio.h>
 #include "message.h"
+#include <stdint.h>
+
+#define PTR_REG 0x00
+#define TEMP_REG 0x00
+#define CONFIG_REG 0x01
+#define TLOW_REG 0x02
+#define THIGH_REG 0x03
+#define READ 0x01
+#define WRITE 0x00
+#define SHUTDOWN_ENABLE 0x0100
+#define ENABLE_25 0x00
+#define ENABLE_1 0x40
+#define ENABLE_4 0x80
+#define ENABLE_8 0xC0
+#define DEV_ADDR 0x48
 
 enum
 {

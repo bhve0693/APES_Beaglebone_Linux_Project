@@ -67,7 +67,7 @@ static volatile sig_atomic_t shutdown_enable_complete = 0;
 static volatile sig_atomic_t conv_rate_set = 0;
 static volatile sig_atomic_t retry_light_log = 0;
 static volatile sig_atomic_t retry_temp_log = 0;
-static volatile sig_atomic_t api_request = 0;
+static volatile sig_atomic_t light_write_value = 0;
 
 static enum brightness prev_bright_status = DARK;
 
@@ -97,7 +97,7 @@ static mqd_t light_req_queue;
 
 FILE *fp;
 
-//static unsigned int counter;
+
 static volatile sig_atomic_t counter =0;
 logpacket msg_tempsensor,msg_lightsensor, msg_synclogger;
 
@@ -401,7 +401,7 @@ enum Status api_temp_req_hdlr()
             break;
         case REQ_TEMPREG_PTRREG_WRITE:
         	printf("\nTEMP PTR WRITE REQUEST RCVD\n");
-        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	temp_write_value = strtol(msg_request.logmsg,NULL,16);  
         	status = write_temp_register(fd_temp,REQ_TEMPREG_PTRREG_WRITE,temp_write_value);
         	if(status)
         	{
@@ -421,7 +421,7 @@ enum Status api_temp_req_hdlr()
         	break;
         case REQ_TEMPREG_CONFIG_WRITE:
         	printf("\nTEMP CONFIG WRITE REQUEST RCVD\n");
-        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	temp_write_value = strtol(msg_request.logmsg,NULL,16);   
         	status = write_temp_register(fd_temp,REQ_TEMPREG_CONFIG_WRITE,temp_write_value);
         	if(status)
         	{
@@ -442,7 +442,7 @@ enum Status api_temp_req_hdlr()
 
         case REQ_TEMPREG_DATA_LOW_WRITE:
         	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
-        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	temp_write_value = strtol(msg_request.logmsg,NULL,16);   
         	status = write_temp_register(fd_temp,REQ_TEMPREG_DATA_LOW_WRITE,temp_write_value);
         	if(status)
         	{
@@ -462,7 +462,8 @@ enum Status api_temp_req_hdlr()
         	break;
         case REQ_TEMPREG_DATA_HIGH_WRITE:
         	printf("\nTEMP TLOW WRITE REQUEST RCVD\n");
-        	temp_write_value = (uint16_t)atoi(msg_request.logmsg);  
+        	temp_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nTemp write value:%4x\n",temp_write_value);  
         	status = write_temp_register(fd_temp,REQ_TEMPREG_DATA_HIGH_WRITE,temp_write_value);
         	if(status)
         	{
@@ -579,8 +580,6 @@ enum Status api_temp_req_hdlr()
         	break;        	
 
     }
-                    
-    api_request =0;
     return SUCCESS;
 }
 
@@ -646,7 +645,6 @@ void *app_tempsensor_task(void *args) // Temperature Sensor Thread/Task
             exit_handler(SIGINT);
             //ERR_Log();
         }
-        if(!api_request)
         temp_value = temp_read(fd_temp,REQ_TEMP_CELSIUS);
         sprintf(temp_buff,"%f",temp_value);
         gettimeofday(&msg_tempsensor.time_stamp, NULL);
@@ -1059,10 +1057,187 @@ enum Status api_write_light_tlow_register(uint16_t writeval)
 	
 }
 
+enum Status api_write_light_thigh_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_THIGH_WRITE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+	
+}
 
 
+enum Status api_write_light_ctrl_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_CRTL_WRITE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }	
+}
+
+enum Status api_write_light_intr_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_INTRREG_WRITE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }	
+}
 
 
+enum Status api_config_integration_timing_register(uint16_t writeval)
+{
+	/*if(!(writeval >0 && writeval <0x02))
+	{
+		printf("\n Invalid Writeval\n");
+		exit_handler(SIGINT);
+		return FAIL;
+
+	}*/
+
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_SET_INTEGRATION_TIME;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }	
+}
+
+enum Status api_light_interrupt_setting(uint8_t setting)
+{
+	logpacket request_pck;
+    uint8_t status;
+    if(setting)
+    	request_pck.req_type = REQ_INTERRUPT_ENABLE;
+    else
+    	request_pck.req_type = REQ_INTERRUPT_DISABLE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }
+
+}
+
+enum Status api_write_light_timing_register(uint16_t writeval)
+{
+	logpacket request_pck;
+    uint8_t status;
+    request_pck.req_type = REQ_LIGHT_TIMINGREG_WRITE;
+    char *light_buff = (char*)malloc(sizeof(uint16_t));
+    sprintf(light_buff,"%4x",writeval);
+    strcpy(request_pck.logmsg,light_buff);
+    status=mq_send(light_req_queue, (const logpacket*)&request_pck, sizeof(request_pck),1);
+    printf("\nStatus Value of light req queue %d\n",status);
+    printf("\n Sending Request Type %d\n",request_pck.req_type);
+    if(status == -1)
+    {
+        printf("\nMain was unable to send request message\n");
+    }
+    request_flag_light =1;
+    while(!light_req_processed);
+    if(light_write_complete)
+    {
+    	light_write_complete = 0; 
+    	return SUCCESS;
+    }
+    else
+    {
+    	return FAIL;
+    }	
+}
 
 
 enum Status api_light_req_hdlr()
@@ -1075,8 +1250,8 @@ enum Status api_light_req_hdlr()
     char *light_buff_float = (char*)malloc(sizeof(float));
     char *light_buff_uint16 = (char*)malloc(sizeof(uint16_t));
     uint16_t light_value_uint16;
-    float temp_value_float;
-    uint16_t light_write_value;
+
+    
     status = mq_receive(light_req_queue,(logpacket*)&msg_request, sizeof(msg_request), NULL);
     if(status >0)
     {
@@ -1343,12 +1518,15 @@ enum Status api_light_req_hdlr()
             break;  
 
 		case REQ_LIGHT_TLOW_WRITE:
-			light_write_value = (uint16_t)atoi(msg_request.logmsg);
+
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
             if(write_light_registers(fd_light,T_LOW,light_write_value))
             {
             	strcpy(msg_request.logmsg,"INVALID TLOW WRITE VALUE");
             	status = FAIL;
             }
+
         	if(api_temp_log(msg_request))
             {
                 printf("\nlight was unable to log data request\n");
@@ -1365,6 +1543,159 @@ enum Status api_light_req_hdlr()
 
             break;
 
+		case REQ_LIGHT_THIGH_WRITE:
+
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(write_light_registers(fd_light,T_HIGH,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID THIGH WRITE VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break;
+		case REQ_LIGHT_CRTL_WRITE:
+
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(write_light_registers(fd_light,CNTRL,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID CTRL WRITE VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break; 
+		case REQ_LIGHT_INTRREG_WRITE:
+
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(write_light_registers(fd_light,INTR,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID INTREG WRITE VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break; 
+		case REQ_LIGHT_TIMINGREG_WRITE:
+
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(write_light_registers(fd_light,TIMING,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID TIMING WRITE VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break;
+
+
+		case REQ_SET_INTEGRATION_TIME:
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(config_integration_timing(fd_light,light_write_value))
+            {
+            	strcpy(msg_request.logmsg,"INVALID TIMING WRITE VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break;
+		case REQ_INTERRUPT_ENABLE:
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(control_intr_reg(fd_light,1))
+            {
+            	strcpy(msg_request.logmsg,"INVALID Interrupt config VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break;            
+		case REQ_INTERRUPT_DISABLE:
+            light_write_value = strtol(msg_request.logmsg,NULL,16);
+            printf("\nLight write value:%4x\n",light_write_value);
+            if(control_intr_reg(fd_light,0))
+            {
+            	strcpy(msg_request.logmsg,"INVALID Interrupt config VALUE");
+            	status = FAIL;
+            }
+
+        	if(api_temp_log(msg_request))
+            {
+                printf("\nlight was unable to log data request\n");
+                //ERR_Log();
+                return FAIL;
+            }
+
+            pthread_cond_signal(&sig_req_process);
+            if(!status)
+            	light_write_complete = 1;
+            light_req_processed = 1;                
+            break;     
     }  	
 
 
@@ -1418,22 +1749,24 @@ enum Status api_read_lightreg(request_t reg_request,uint16_t *readval)
 enum Status api_write_lightreg(request_t reg_request,uint16_t writeval)
 {
 	enum Status state;
-	api_request =1;
-	printf("\n API_Request %d\n\n\n",api_request);
 	switch(reg_request)
 	{
         case REQ_LIGHT_TLOW_WRITE:
             state = api_write_light_tlow_register(writeval);
             break;
-        /*case REQ_LIGHTREG_CONFIG_WRITE: 
-            state = api_write_temp_config_register(writeval);
+        case REQ_LIGHT_THIGH_WRITE:
+            state = api_write_light_thigh_register(writeval);
+            break;        
+
+        case REQ_LIGHT_CRTL_WRITE: 
+            state = api_write_light_ctrl_register(writeval);
             break;
-        case REQ_LIGHTREG_DATA_LOW_WRITE: 
-            state = api_write_temp_tlow_register(writeval);
+        case REQ_LIGHT_INTRREG_WRITE: 
+            state = api_write_light_intr_register(writeval);
             break;
-        case REQ_LIGHTREG_DATA_HIGH_WRITE: 
-            state = api_write_temp_thigh_register(writeval);
-            break;*/
+        case REQ_LIGHT_TIMINGREG_WRITE: 
+            state = api_write_light_timing_register(writeval);
+            break;
         default:
         	state = FAIL;
         	break;      		
@@ -1489,9 +1822,8 @@ void *app_lightsensor_task(void *args) //Light Sensor Thread/Task
             printf("\nRecevied Message in Lightsensor Thread : %d\n",recvcounter);
             counter+=1;
         }
-        if(!api_request)
         temp_value_light = light_read(fd_light);
-        curr_bright_status = night_or_day();
+        //curr_bright_status = night_or_day();
         if(curr_bright_status == DARK && prev_bright_status == LIGHT)
         {
             strcpy(msg_lightsensor.logmsg,"0");
@@ -1730,7 +2062,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
                 if(temp.req_type == REQ_LIGHT_TLOW_WRITE)
                 {
-                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    sprintf(logbuff,"\nReceived TLOW WRITE Request to Light Task with Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);            	
@@ -1739,7 +2071,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
                 if(temp.req_type == REQ_LIGHT_THIGH_WRITE)
                 {
-                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    sprintf(logbuff,"\nReceived THIGH WRITE Request to Light Task with Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);            	
@@ -1748,7 +2080,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
                 if(temp.req_type == REQ_LIGHT_CRTL_WRITE)
                 {
-                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    sprintf(logbuff,"\nReceived CTRL WRITE Request to Light Task with Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);            	
@@ -1757,7 +2089,7 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
                 if(temp.req_type == REQ_LIGHT_TIMINGREG_WRITE)
                 {
-                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    sprintf(logbuff,"\nReceived TIMING WRITE Request to Light Task with Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);            	
@@ -1766,13 +2098,37 @@ void *app_sync_logger(void *args) // Synchronization Logger Thread/Task
 
                 if(temp.req_type == REQ_LIGHT_INTRREG_WRITE)
                 {
-                    sprintf(logbuff,"\nReceived WRITE Request to Light Task with Value :");
+                    sprintf(logbuff,"\nReceived INTR WRITE Request to Light Task with Value :");
                     strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
                     fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
                     exit_handler(SIGINT);            	
 
-                }              
+                }   
 
+                if(temp.req_type == REQ_SET_INTEGRATION_TIME)
+                {
+                    sprintf(logbuff,"\nReceived Config Integration Time Request to Light Task with Value :");
+                    strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }           
+                if(temp.req_type == REQ_INTERRUPT_ENABLE)
+                {
+                    sprintf(logbuff,"\nReceived Light Sensor Interrupt Enable Request\n");
+                    //strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }
+                if(temp.req_type == REQ_INTERRUPT_DISABLE)
+                {
+                    sprintf(logbuff,"\nReceived Light Sensor Interrupt Disable Request\n");
+                    //strncat(logbuff, temp.logmsg, strlen(temp.logmsg));
+                    fwrite(logbuff,1, strlen(logbuff)*sizeof(char),fp);
+                    exit_handler(SIGINT);            	
+
+                }
                 if(temp.req_type == REQ_POWEROFF)
                 {
                     sprintf(logbuff,"\nReceived Data Request to Temperature Task! Exiting App!");
@@ -2321,8 +2677,6 @@ enum Status api_write_temp_thigh_register(uint16_t writeval)
 enum Status api_write_tempreg(request_t reg_request,uint16_t writeval)
 {
 	enum Status state;
-	api_request =1;
-	printf("\n API_Request %d\n\n\n",api_request);
 	switch(reg_request)
 	{
         case REQ_TEMPREG_PTRREG_WRITE:
@@ -2685,17 +3039,18 @@ int main(int argc, char **argv)
         //Testing Querry APIs of Temperature Task
         api_count++;
         uint16_t readval;
-        uint16_t writeval = 0xFF00;
+        uint16_t writeval = 0x01;
+        uint8_t setting = 1;
         if (api_count == 1 && !req_processed)
         {
             api_count++;
             printf("\n API COUNT %d",api_count);
-            api_write_lightreg(REQ_LIGHT_TLOW_WRITE,writeval);
+            //api_light_interrupt_setting(setting);
+            //api_config_integration_timing_register(writeval);
+           // api_write_lightreg(REQ_LIGHT_TIMINGREG_WRITE,writeval);
             //api_read_light_id_register
             //api_read_lightreg(REQ_LIGHT_TIMINGREG_READ, &readval);
-            //api_write_tempreg(REQ_TEMPREG_DATA_HIGH_WRITE,writeval);
-            //a
-        	//api_temp_rqt_shutdown(0);
+           // api_write_tempreg(REQ_TEMPREG_DATA_LOW_WRITE,writeval);
         }
 
     }

@@ -97,14 +97,14 @@ int8_t link_req_hb_notif(mqd_t msgdt); // Requests Notifications from all the ta
 					 
 int8_t link_send_hb_notif(mqd_t msgdt); 
 
-int8_t link_send_log_init_status(mqd_t msgdt,struct logpacket pack);
+int8_t link_send_log_init_status(mqd_t msgdt,logpacket pack);
 
-int8_t link_send_log_data_request(mqd_t msgdt, struct logpacket pack);
+int8_t link_send_log_data_request(mqd_t msgdt, logpacket pack);
 
-int8_t link_send_log_err(mqd_t msgdt, struct logpacket pack);
+int8_t link_send_log_err(mqd_t msgdt, logpacket pack);
 
 int8_t link_read_data(mqd_t msgdt,void* data, srcid source, srcid dest); // Will be called by query functions. Will share the message queues with the sensor task.
 
-int8_t link_send_logs(struct logpacket pack);
+int8_t link_send_logs(logpacket pack);
 
 #endif

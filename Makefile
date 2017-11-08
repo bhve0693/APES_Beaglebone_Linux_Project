@@ -14,7 +14,7 @@ CC=arm-linux-gnueabihf-gcc
 CFLAGS= -O0 -g -w $(INCLUDE_DIRS) -pthread
 LIBS =  -lrt -lm
 OUTPUT=main_exec
-#OUTPUT=main_exec i2c_drive
+#OUTPUT=i2c_light.o
 
 #Will be added as we add on header and C files
 HFILES= message.h fw_i2c.h

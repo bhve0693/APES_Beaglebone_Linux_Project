@@ -24,19 +24,6 @@
 
 
 
-#define PTR_REG 0x00
-#define TEMP_REG 0x00
-#define CONFIG_REG 0x01
-#define TLOW_REG 0x02
-#define THIGH_REG 0x03
-#define READ 0x01
-#define WRITE 0x00
-#define SHUTDOWN_ENABLE 0x0100
-#define ENABLE_25 0x00
-#define ENABLE_1 0x40
-#define ENABLE_4 0x80
-#define ENABLE_8 0xC0
-#define DEV_ADDR 0x48
 
 
 
@@ -140,6 +127,7 @@ enum Status write_thigh_reg(uint8_t fd,uint8_t reg,uint16_t value)
 	buffer[0] = reg;
 	buffer[1] = (uint8_t)((value & 0xFF00)>>8);
 	buffer[2] = (uint8_t)(value & 0x00FF);
+	printf("\nbuffer0,buffer1,buffer2:%x%x%x",buffer[0],buffer[1],buffer[2]);
 	stat = i2c_write_word(fd,buffer);
 	free(buffer);
 	return stat;	
@@ -239,7 +227,8 @@ enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 	enum Status stat;
 	switch(reg_option)
 	{
-		case REQ_TEMPREG_PTRREG_WRITE:	if(val>3)
+		case REQ_TEMPREG_PTRREG_WRITE:	
+				if(val>3)
 				{	
 					printf("ERR:Pointer register is 8 bits long with higher 6 bits set to 0\n");
 					stat = FAIL;
@@ -247,13 +236,18 @@ enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 				else stat = write_ptr_reg(fd,reg_option);
 				break;
 
-		case REQ_TEMPREG_CONFIG_WRITE:	stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);
+		case REQ_TEMPREG_CONFIG_WRITE:	
+				stat = write_config_reg(fd,PTR_REG|CONFIG_REG,val);
 				break;
 
-		case REQ_TEMPREG_DATA_LOW_WRITE: stat = write_tlow_reg(fd,PTR_REG|TLOW_REG,val);
+		case REQ_TEMPREG_DATA_LOW_WRITE: 
+
+				stat = write_tlow_reg(fd,PTR_REG|TLOW_REG,val);
 				break;
 		
-		case REQ_TEMPREG_DATA_HIGH_WRITE: stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
+		case REQ_TEMPREG_DATA_HIGH_WRITE: 
+				printf("Value in high register:%4x",val);
+				stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
 				break;
 		
 		default:stat = FAIL;

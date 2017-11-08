@@ -21,9 +21,7 @@
 #include "i2c_light.h"
 
 enum brightness light_indication = DARK;
-//bright_t light_indication = DARK;
 
-//char *light_indication;
 enum Status read_id_reg(uint8_t fd,uint8_t reg,uint8_t *val)
 {
 	enum Status stat;
@@ -237,9 +235,9 @@ enum Status write_light_registers(uint8_t fd,uint8_t reg_option,uint16_t val)
 	switch(reg_option)
 	{
 		case CNTRL:
-			if(val == 0x01 || val ==0x02)
+			if(val == 0x01 || val ==0x02 || val>0x03)
 			{
-				printf("ERR:Invalid value\n");
+				printf("ERR:Invalid CTRL Write value\n");
 				stat = FAIL;
 			}
 			else 
@@ -250,9 +248,9 @@ enum Status write_light_registers(uint8_t fd,uint8_t reg_option,uint16_t val)
 			break;
 
 		case TIMING:
-			if(val > 0x31 || (val | 0x0004))
+			if(val > 0x31 || (val == 0x0004))
 			{
-				printf("ERR:Invalid value\n");
+				printf("ERR:Invalid Timing Write value\n");
 				stat = FAIL;
 			}
 			else
@@ -265,7 +263,7 @@ enum Status write_light_registers(uint8_t fd,uint8_t reg_option,uint16_t val)
 		case INTR:
 			if(val > 0x63)
 			{
-				printf("ERR:Invalid value\n");
+				printf("ERR:Invalid INTR Write value\n");
 				stat = FAIL;
 			}
 			else
@@ -303,20 +301,20 @@ enum Status config_integration_timing(uint8_t fd,uint8_t integration_option)
 	{
 
 		t8_val |= INT_137;
-		stat = i2c_write(fd,&t8_val);
+	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 13.7ms:%x\n",t8_val);
 	}
 	else if(integration_option==1)
 	{
 
 		t8_val |= INT_101;
-		stat = i2c_write(fd,&t8_val);
+	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 101ms:%x\n",t8_val);
 	}
 	else if(integration_option==2)
 	{
 		t8_val |= INT_402;
-		stat = i2c_write(fd,&t8_val);
+	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 402ms:%x\n",t8_val);
 	}
 	else
@@ -324,6 +322,7 @@ enum Status config_integration_timing(uint8_t fd,uint8_t integration_option)
 		printf("\nERR:Option not applicable\n");
 		stat = FAIL;
 	}
+	stat = write_light_registers(fd,TIMING,t8_val);
 	return stat;
 }
 
@@ -340,12 +339,10 @@ enum Status control_intr_reg(uint8_t fd,uint8_t intr_option)
 	{
 
 		i8_val |= INTR_ENABLE;
-		stat = i2c_write(fd,&i8_val);
 		printf("Interrupt register enabled:%x\n",i8_val);
 	}
 	else if(!intr_option)
 	{
-		stat = i2c_write(fd,&i8_val);
 		printf("Interrupt register disabled:%x\n",i8_val);
 	}
 	else
@@ -353,6 +350,7 @@ enum Status control_intr_reg(uint8_t fd,uint8_t intr_option)
 		printf("\nERR:Option not applicable\n");
 		stat = FAIL;
 	}
+	stat = write_light_registers(fd,INTR,i8_val);
 	return stat;
 }
 
