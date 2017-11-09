@@ -301,20 +301,17 @@ enum Status config_integration_timing(uint8_t fd,uint8_t integration_option)
 	{
 
 		t8_val |= INT_137;
-	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 13.7ms:%x\n",t8_val);
 	}
 	else if(integration_option==1)
 	{
 
 		t8_val |= INT_101;
-	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 101ms:%x\n",t8_val);
 	}
 	else if(integration_option==2)
 	{
 		t8_val |= INT_402;
-	//	stat = i2c_write(fd,&t8_val);
 		printf("Timing register set with Int value 402ms:%x\n",t8_val);
 	}
 	else
@@ -382,7 +379,6 @@ enum Status light_sensor_switchon(uint8_t fd)
 	}
 	if(readval==0x00)
 	{
-		printf("Light sensor is powered off....write value 0x03 to power on\n");
 		stat = i2c_write(fd,&on_val);
 		if(stat)
 		{
@@ -416,11 +412,7 @@ uint16_t read_adc0(uint8_t fd)
 	}
 	stat = i2c_read(fd,&readval_L);
 	
-	if(!stat)
-	{
-		printf("\nSuccessfully read light value from ADC0 low register operation. Value is %x.\n",readval_L);
-	}
-	else
+	if(stat)
 	{
 		printf("\nFailed to read value from control register:%s\n",strerror(errno));
 		return FAIL;
@@ -436,18 +428,13 @@ uint16_t read_adc0(uint8_t fd)
 		exit(1);
 	}
 	stat = i2c_read(fd,&readval_H);
-	if(!stat)
-	{
-		printf("\nSuccessfully read light value from ADC0 high register operation. Value is %x.\n",readval_H);
-	}
-	else 
+	if(stat)
 	{
 		printf("\nFailed to read value from control register:%s\n",strerror(errno));
 		return FAIL;
 		exit(1);
 	}
 	final_lumen = (readval_H<<8)|readval_L;
-	printf("Final light value:%x\n",final_lumen);
 	return final_lumen;
 }
 
@@ -468,10 +455,6 @@ uint16_t read_adc1(uint8_t fd)
 	
 	if(!stat)
 	{
-		printf("\nSuccessfully read light value from ADC1 low register operation. Value is %x.\n",readval_L);
-	}
-	else
-	{
 		printf("\nFailed to read value from control register:%s\n",strerror(errno));
 		return FAIL;
 		exit(1);
@@ -487,10 +470,6 @@ uint16_t read_adc1(uint8_t fd)
 	}
 	stat = i2c_read(fd,&readval_H);
 	if(!stat)
-	{
-		printf("\nSuccessfully read light value from ADC1 high register operation. Value is %x.\n",readval_H);
-	}
-	else 
 	{
 		printf("\nFailed to read value from control register:%s\n",strerror(errno));
 		return FAIL;
@@ -526,12 +505,6 @@ double light_read(uint8_t fd)
 	uint8_t readval;
 	uint16_t final_lumen0,final_lumen1,tl_val,th_val,tmid_val;
 	enum Status stat;
-	/*stat = i2c_light_init(fd,DEV_LIGHT_ADDR);
-	if(stat)
-	{
-		printf("\nFailed ioctl() operation:%s\n",strerror(errno));
-		exit(1);
-	}*/
 	stat = light_sensor_switchon(fd);
 	if(stat)
 	{
@@ -549,25 +522,21 @@ double light_read(uint8_t fd)
 	else printf("\nHIGH threshold is set to:%4x\n",th_val);
 
 	tmid_val = 0x4000;
-	printf("tmid_val:%4x",tmid_val);
 	final_lumen0 = read_adc0(fd);
 	if(final_lumen0>=tl_val && final_lumen0<tmid_val)
 	{
 		light_indication = DARK;
-			//light_indication =(char *)"Night";
+
 	}
 	else if(final_lumen0>=tmid_val && final_lumen0<=th_val)
 	{
 		light_indication = LIGHT;	
-			//light_indication =(char *)"Day";
 	}
 	final_lumen1 = read_adc1(fd);
 
 	if(final_lumen0 !=0)
 		light_lux = calc_lux_val(final_lumen0,final_lumen1);
-	printf("\nLight Lux value= %lf\n",light_lux);
-
-	//close(fd);	
+	printf("\nLight intensity value:%lf\n",light_lux);
 	return light_lux;
 
 }

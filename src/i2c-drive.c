@@ -18,14 +18,12 @@
 #include <pthread.h>
 #include "fw_i2c.h"
 #include "i2c_light.h"
-//#include "fw_i2c.h"
 
 pthread_mutex_t write_lock;
 
 pthread_mutex_t read_lock;
 
 
-//To check which i2c adapter needs to be accessed, run i2cdetect -l
 enum Status i2c_temp_init(uint8_t fd,uint8_t addr)
 {
 

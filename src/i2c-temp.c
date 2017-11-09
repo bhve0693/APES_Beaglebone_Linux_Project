@@ -127,7 +127,6 @@ enum Status write_thigh_reg(uint8_t fd,uint8_t reg,uint16_t value)
 	buffer[0] = reg;
 	buffer[1] = (uint8_t)((value & 0xFF00)>>8);
 	buffer[2] = (uint8_t)(value & 0x00FF);
-	printf("\nbuffer0,buffer1,buffer2:%x%x%x",buffer[0],buffer[1],buffer[2]);
 	stat = i2c_write_word(fd,buffer);
 	free(buffer);
 	return stat;	
@@ -246,7 +245,6 @@ enum Status write_temp_register(uint8_t fd,request_t reg_option,uint16_t val)
 				break;
 		
 		case REQ_TEMPREG_DATA_HIGH_WRITE: 
-				printf("Value in high register:%4x",val);
 				stat = write_thigh_reg(fd,PTR_REG|THIGH_REG,val);
 				break;
 		
@@ -315,7 +313,6 @@ float read_tempsense(uint8_t fd,float resolution,request_t unit_choice)
 		temperature_value=((high_byte<<8)|low_byte)>>4;
 		if(high_byte & 0x80)
 		{
-			printf("\nNegative temperature value detected..\n");
 			temperature_value=((high_byte<<8)|low_byte)>>4;
 			temperature_value = (~temperature_value)+1;
 		}
